@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-05-13 13:38:40",
+  "status": 500,
+  "error": "Internal Server Error",
+  "path": "/api/accountRecordCheckResult/checkAllUser",
+  "data": {
+    "content": [],
+    "total": 0,
+    "nodeIds": [
+      1,
+      2,
+      3
+    ],
+    "totalPage": 1
+  }
+}

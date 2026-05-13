@@ -1,0 +1,73 @@
+{
+  "success": true,
+  "code": 200,
+  "message": "OK",
+  "data": {
+    "content": [
+      {
+        "userId": 3769590736,
+        "nick": "AUX奥克斯户外旗舰店",
+        "pagedRecords": {
+          "content": [
+            {
+              "id": 17563916,
+              "userId": 3769590736,
+              "billTime": "2026-05-07 18:10:59",
+              "bookTransNo": "CARN881303607093108531",
+              "outOrderId": "2533101763248920",
+              "inAmount": null,
+              "outAmount": 97.9,
+              "bizTypeDesc": "资金扣减",
+              "remark": "快手商品赔付-现金补偿",
+              "attach": "{\"reason\":\"商家责任->售后退款问题->商品使用故障/功能缺失\",\"bizType\":\"aheadClaimRetrieve\",\"outNo\":\"aheadClaimRetrieve_126618268C0\",\"outOrderNo\":\"2533101763248920\"}"
+            }
+          ],
+          "pageNumber": 1,
+          "pageSize": 20,
+          "total": 1,
+          "totalPage": 1
+        }
+      },
+      {
+        "userId": 2856199017,
+        "nick": "可可膜法洗发护发旗舰店",
+        "pagedRecords": {
+          "content": [
+            {
+              "id": 17666077,
+              "userId": 2856199017,
+              "billTime": "2026-05-09 16:52:42",
+              "bookTransNo": "CARN882010859051563697_CBSUB2",
+              "outOrderId": null,
+              "inAmount": 88.75,
+              "outAmount": null,
+              "bizTypeDesc": "资金扣减回退",
+              "remark": "2025支付营销补贴发票违约金扣款",
+              "attach": "{\"outNo\":\"invoiceBillPayTax_27842230517\",\"reason\":\"缴纳发票核销，发票已审核通过\",\"bizType\":\"invoiceBillPayTax\"}"
+            },
+            {
+              "id": 17666078,
+              "userId": 2856199017,
+              "billTime": "2026-05-09 16:52:25",
+              "bookTransNo": "CARN882009044360757597_CBSUB2",
+              "outOrderId": null,
+              "inAmount": 1621.92,
+              "outAmount": null,
+              "bizTypeDesc": "资金扣减回退",
+              "remark": "2025平台补贴发票违约金扣款",
+              "attach": "{\"outNo\":\"invoiceBillPayTax_27842242417\",\"reason\":\"缴纳发票核销，发票已审核通过\",\"bizType\":\"invoiceBillPayTax\"}"
+            }
+          ],
+          "pageNumber": 1,
+          "pageSize": 20,
+          "total": 2,
+          "totalPage": 1
+        }
+      }
+    ],
+    "pageNumber": 1,
+    "pageSize": 50,
+    "total": 2,
+    "totalPage": 1
+  }
+}

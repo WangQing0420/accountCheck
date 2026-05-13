@@ -1,0 +1,9 @@
+{
+  "timestamp": "2026-05-13 11:43:44",
+  "status": 500,
+  "error": "Internal Server Error",
+  "path": "/api/accountRecordCheckResult/checkAllUser",
+  "data": {
+    "content": []
+  }
+}
