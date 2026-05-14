@@ -173,6 +173,25 @@ fetch_account_records.py
 
 `account_record_workflow.py` 是另一条入口：它先复用 `account_record_fetcher.py` 拉取数据，再调用 `bill_rule_analyzer.py` 生成分析报告；只有传 `--raw-output inputs/...json` 时才会把原始接口响应保存下来。
 
+### 一键拉取并分类
+
+如果你希望把“从管理后台拉取账单检查记录 -> 写入 `inputs/` -> 批量生成 `outputs/` 分类报告”放到一个命令里跑，可以直接用：
+
+```bash
+python3 account_record_pipeline.py --all \
+  --start-time "2026-05-01 00:00:00" \
+  --end-time "2026-05-13 23:59:59"
+```
+
+也可以只跑单个 job 或平台别名：
+
+```bash
+python3 account_record_pipeline.py dou_shop_account_item
+python3 account_record_pipeline.py dou
+```
+
+这个入口会先复用 `fetch_account_records.py` 的 job 解析和拉取逻辑，把结果写到 `inputs/<platform>/...json`，再复用 `classify_records.py --split` 生成对应的 `outputs/<platform>/<bill_json_stem>/` 报告。最后它只做汇总和退出码，不替你做最后的归类决策。
+
 ## 使用配置文件拉取
 
 常用拉取参数可以维护在 `fetch_jobs.json`，避免每次手写完整命令。公共时间范围和分页参数放在 `defaults`，每个平台或账单类型只维护自己的差异：

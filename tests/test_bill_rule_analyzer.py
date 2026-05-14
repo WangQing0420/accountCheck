@@ -7,6 +7,7 @@ from pathlib import Path
 from bill_rule_analyzer import (
     Rule,
     load_rows,
+    parse_account_expense_types,
     parse_account_record_rules,
     render_report,
 )
@@ -72,6 +73,33 @@ class RuleParserTests(unittest.TestCase):
         self.assertEqual(len(rules), 1)
         self.assertEqual(rules[0].source_type, "all")
         self.assertTrue(rules[0].matches({"memo": "基础软件服务费调整"}, "TAOBAO_ACCOUNT_RECORD"))
+
+    def test_parses_account_expense_type_parent_and_child_names(self):
+        content = textwrap.dedent(
+            """
+            account_expense_types = [
+              { parent_id: 1000, parent_name: '平台扣点', actives: [
+                { types: [[1301, '基础软件服务费'], [1001, '天猫佣金', { is_b: true }], [3090, '直播回放服务费', parent_cost_type_id: 23]] },
+              ], inactives: [
+                { types: [[1020, '垂直积分']] },
+              ] },
+              { parent_id: 3000, parent_name: '营销费', actives: [
+                { types: [[3001, '淘客佣金']] },
+              ] },
+            ]
+            """
+        )
+
+        expense_types = parse_account_expense_types(content)
+
+        self.assertEqual(expense_types[1301].name, "基础软件服务费")
+        self.assertEqual(expense_types[1301].parent_name, "平台扣点")
+        self.assertEqual(expense_types[1001].name, "天猫佣金")
+        self.assertEqual(expense_types[1001].parent_name, "平台扣点")
+        self.assertEqual(expense_types[3090].name, "直播回放服务费")
+        self.assertEqual(expense_types[3090].parent_name, "平台扣点")
+        self.assertEqual(expense_types[3001].name, "淘客佣金")
+        self.assertEqual(expense_types[3001].parent_name, "营销费")
 
 
 class InputAndReportTests(unittest.TestCase):

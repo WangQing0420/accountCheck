@@ -93,6 +93,14 @@ class Rule:
         return True
 
 
+@dataclass(frozen=True)
+class AccountExpenseType:
+    id: int
+    name: str
+    parent_name: str
+    parent_id: int | None = None
+
+
 def normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     return {str(key).strip().upper(): value for key, value in row.items()}
 
@@ -119,6 +127,50 @@ def parse_account_record_rules(content: str, platform: str) -> list[Rule]:
     body = extract_account_record_hash_body(content)
     entries = parse_top_level_entries(body)
     return [rule_from_entry(rule_id, params, platform) for rule_id, params in entries]
+
+
+def parse_account_expense_types(content: str) -> dict[int, AccountExpenseType]:
+    body = extract_account_expense_types_array_body(content)
+    parent_entries = RubyLiteralParser("[" + body + "]").parse_array()
+    result: dict[int, AccountExpenseType] = {}
+    for parent in parent_entries:
+        if not isinstance(parent, dict):
+            continue
+        parent_name = str(parent.get("parent_name", ""))
+        parent_id = parent.get("parent_id")
+        for section_name in ("actives", "inactives"):
+            section = parent.get(section_name) or []
+            if not isinstance(section, list):
+                continue
+            for group in section:
+                if not isinstance(group, dict):
+                    continue
+                types = group.get("types") or []
+                if not isinstance(types, list):
+                    continue
+                for type_entry in types:
+                    if not isinstance(type_entry, list) or len(type_entry) < 2:
+                        continue
+                    expense_type_id, expense_type_name = type_entry[0], type_entry[1]
+                    if isinstance(expense_type_id, int):
+                        result[expense_type_id] = AccountExpenseType(
+                            id=expense_type_id,
+                            name=str(expense_type_name),
+                            parent_name=parent_name,
+                            parent_id=parent_id if isinstance(parent_id, int) else None,
+                        )
+    return result
+
+
+def extract_account_expense_types_array_body(content: str) -> str:
+    variable_match = re.search(r"^\s*account_expense_types\s*=", content, re.M)
+    if not variable_match:
+        raise ValueError("account_expense_types array not found")
+    bracket_start = content.find("[", variable_match.end())
+    if bracket_start == -1:
+        raise ValueError("account_expense_types array body not found")
+    bracket_end = find_matching(content, bracket_start, "[", "]")
+    return content[bracket_start + 1 : bracket_end]
 
 
 def extract_account_record_hash_body(content: str) -> str:
@@ -247,6 +299,8 @@ class RubyLiteralParser:
         self.skip_ws_and_comments()
         if self.text.startswith("{", self.index):
             return self.parse_hash()
+        if self.text.startswith("[", self.index):
+            return self.parse_array()
         if self.text.startswith("'", self.index) or self.text.startswith('"', self.index):
             return self.parse_string()
         if self.text.startswith(":", self.index):
@@ -260,7 +314,44 @@ class RubyLiteralParser:
         if self.text.startswith("false", self.index):
             self.index += 5
             return False
+        if self.starts_bare_hash_pair():
+            return self.parse_bare_hash()
         return self.parse_int()
+
+    def starts_bare_hash_pair(self) -> bool:
+        return re.match(r"[A-Za-z_]\w*\??\s*:", self.text[self.index :]) is not None
+
+    def parse_bare_hash(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        while True:
+            key = self.parse_key()
+            self.skip_ws_and_comments()
+            self.expect(":")
+            value = self.parse_value()
+            result[str(key)] = value
+            self.skip_ws_and_comments()
+            if self.peek() != ",":
+                return result
+
+            comma_index = self.index
+            self.index += 1
+            self.skip_ws_and_comments()
+            if not self.starts_bare_hash_pair():
+                self.index = comma_index
+                return result
+
+    def parse_array(self) -> list[Any]:
+        result: list[Any] = []
+        self.expect("[")
+        while True:
+            self.skip_ws_and_comments()
+            if self.peek() == "]":
+                self.index += 1
+                return result
+            result.append(self.parse_value())
+            self.skip_ws_and_comments()
+            if self.peek() == ",":
+                self.index += 1
 
     def parse_hash(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
