@@ -1,73 +1,56 @@
 ---
 name: account-record-classification
-description: 用于在 account_check 项目中对单个账单检查结果 JSON 做相似归类、平台费用候选拆分、按 templates 生成 outputs 报告。
+description: 用于在 account_check 项目中对单个账单检查结果 JSON 做相似分组，并生成普通分组报告。
 ---
 
-# 账单检查结果归类
+# 账单检查结果相似分组
 
 适用目录：`/Users/wangqing/PycharmProjects/account_check`
 
 ## 常用命令
 
 ```bash
-python3 classify_records.py inputs/taobao/taobao_check_result.json --split
+python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json \
+  --output outputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
 ```
 
-输出：
+也可以跑一个平台下所有 JSON：
 
-```text
-outputs/<platform>/<bill_json_stem>/
-  all.md
-  classification_required_platform_fee.md
-  classification_required_non_platform_fee.md
-  no_classification_non_platform_fee.md
+```bash
+python3 classify_records.py 淘宝
+python3 classify_records.py taobao
+python3 classify_records.py inputs/淘宝
 ```
+
+不传 `--output` 且输入是单个 JSON 时报告输出到 stdout。`--output` 只适用于单个 JSON；跑平台或目录时会自动写入 `outputs/<平台>/<bill_json_stem>.md`。
 
 ## 输出格式
 
-`--split` 输出由 `classify_records.py` 决定：
+`classify_records.py` 只生成普通相似分组报告。
 
-- `classification_required_platform_fee.md`：优先套用 `templates/平台费用检查-<平台>-<账单>-平台费用模板.md`。
-- `classification_required_non_platform_fee.md`：优先套用 `账单归类模板`，没有时可用 `资金分析模板`。
-- `all.md` 和 `no_classification_non_platform_fee.md`：保持分组报告格式。
-- 模板匹配必须有明确平台和账单类型线索；没有可靠模板时回退普通分组报告，避免误套模板。
+报告包含：
 
-模板表格行填充约定：
+- 输入文件、输入行数、分组数量。
+- 每个分组的行数。
+- 收入合计、支出合计。
+- 归一化后的分组字段。
+- 每个分组最多 3 个字段原始样例。
+- 每个分组最多 3 个样例 ID。
 
-- 输出分两类：
-  - 兼容已有规则：如果分组样例命中 Rails seeds 中现有 `AccountRecordType`，复用既有命名。
-  - 新增候选：未命中已有规则时，保留人工判断占位符，并在原始记录说明中标记 `新增候选`。
-- 兼容已有规则时：
-  - `账单归类名称` / `名称`：使用 `AccountRecordType.name`。
-  - `平台费用名称`：使用 `expense_type_id` 对应的 `AccountExpenseType.name`。
-  - `科目`：使用该 `AccountExpenseType` 的父级科目名称。
-  - `原始记录` / `原始记录和业务调研`：标记 `已命中规则: <rule_id>` 和 `expense_type_id=<id>`。
-- 新增候选时：
-  - `账单归类名称` / `名称`：用分组主要描述字段生成可读候选名称，不直接使用带订单号占位的公共字符串。
-  - 候选名称应去掉 `(*)`、`（*）`、`订单号［*]`、`订单号:*`、`运单号:*`、长流水占位、纯动作尾巴等，只保留核心业务语义。
-  - `平台费用名称`、`科目`、`费用说明`、`账单来源` 等需要人工判断的列保留占位符。
-- `匹配规则`：包含收支方向和归一化匹配字段。
-- `原始记录` / `原始记录和业务调研`：包含行数、收入/支出合计、判断原因、样例 ID、字段样例。
+默认分组字段包括 `memo`、`bizDesc`、`businessType`、`bizType`、`bizTypeDesc`、`remark`、`feeName`、`accountBillDesc` 等，并兼容 `biz_desc`、`business_type` 这类 snake_case 字段。
+
+分组前会把长订单号、长流水号和括号内长数字归一化为 `*`，例如 `生活费(1234567890123456)` 和 `生活费(2234567890123456)` 会归到同一组。
 
 ## 规则位置
 
 以 `classify_records.py` 为准：
 
-- `NON_DESCRIPTIVE_FIELDS`
-- `NON_PLATFORM_FEE_RULES`
-- `PLATFORM_TEMPLATE_LABELS`
-- `TEMPLATE_BILL_NAME_HINTS`
-- `assess_group()`
-- `select_template_path()`
-- `load_existing_rule_context()`
-- `attach_existing_rule_matches()`
-- `render_template_group_report()`
-
-已有规则来源：
-
-- `fetch_jobs.json`：按 input path 找到 `platform` 和 `source_type`。
-- Rails seeds：默认读取 `/Users/wangqing/workspace/plutus-rails/db/seeds/static/<platform>/account_expense_type.seeds.rb`。
-- 可用 `--rails-root` 和 `--fetch-jobs` 覆盖。
+- `DEFAULT_GROUP_FIELDS`
+- `FIELD_ALIASES`
+- `classify_rows()`
+- `build_group_fields()`
+- `normalize_text()`
+- `render_group_report()`
 
 ## 验证
 

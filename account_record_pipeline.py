@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch account record check results and generate split classification reports."""
+"""Fetch account record check results and generate grouping reports."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from account_record_fetcher import DEFAULT_ENV_PATH, JsonApiError
-from classify_records import load_rows, write_split_reports
+from classify_records import load_rows, render_report
 from fetch_account_records import (
     DEFAULT_CONFIG_PATH,
     FetchJobError,
@@ -40,7 +40,7 @@ class PipelineJobFailure:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fetch account-record check results and generate split classification reports."
+        description="Fetch account-record check results and generate grouping reports."
     )
     parser.add_argument("job", nargs="?", help="Fetch job name or platform alias, e.g. dou.")
     parser.add_argument("--all", action="store_true", help="Fetch every job in the config file.")
@@ -53,9 +53,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--user-id-or-nick", help="Override optional user id or nick filter.")
     parser.add_argument("--node-id", type=int, help="Override node id.")
     parser.add_argument("--single-page", action="store_true", help="Fetch only --page-number instead of all pages.")
-    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT, help=f"Root directory for split reports. Default: {DEFAULT_OUTPUT_ROOT}.")
-    parser.add_argument("--rails-root", type=Path, help="Path to plutus-rails for existing rule naming.")
-    parser.add_argument("--fetch-jobs", type=Path, default=Path("fetch_jobs.json"), help="fetch_jobs.json path for source_type lookup. Default: fetch_jobs.json.")
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT, help=f"Root directory for grouping reports. Default: {DEFAULT_OUTPUT_ROOT}.")
     args = parser.parse_args(argv)
     if args.all and args.job:
         parser.error("provide either a job name or --all, not both")
@@ -99,8 +97,6 @@ def run_pipeline(
     node_id: int | None = None,
     single_page: bool = False,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
-    rails_root: Path | None = None,
-    fetch_jobs_path: Path = Path("fetch_jobs.json"),
     fetcher: Any | None = None,
 ) -> tuple[list[PipelineJobResult], list[PipelineJobFailure]]:
     results: list[PipelineJobResult] = []
@@ -128,13 +124,10 @@ def run_pipeline(
 
         try:
             rows = load_rows(input_path)
-            output_paths = write_split_reports(
-                rows,
-                input_path=input_path,
-                output_root=output_root,
-                rails_root=rails_root,
-                fetch_jobs_path=fetch_jobs_path,
-            )
+            report_path = infer_report_output_path(input_path, output_root)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(render_report(rows, source_name=str(input_path)), encoding="utf-8")
+            output_paths = {"all": report_path}
         except (OSError, ValueError, json.JSONDecodeError) as error:
             failures.append(PipelineJobFailure(job_name=job_name, stage="classify", error=str(error)))
             continue
@@ -142,6 +135,11 @@ def run_pipeline(
         results.append(PipelineJobResult(job_name=job_name, input_path=input_path, output_paths=output_paths))
 
     return results, failures
+
+
+def infer_report_output_path(input_path: Path, output_root: Path) -> Path:
+    platform = input_path.parent.name if input_path.parent.name else "unknown"
+    return output_root / platform / f"{input_path.stem}.md"
 
 
 def format_summary(results: list[PipelineJobResult], failures: list[PipelineJobFailure]) -> str:
@@ -172,8 +170,6 @@ def main(argv: list[str] | None = None) -> int:
             node_id=args.node_id,
             single_page=args.single_page,
             output_root=args.output_root,
-            rails_root=args.rails_root,
-            fetch_jobs_path=args.fetch_jobs,
         )
     except (FetchJobError, JsonApiError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)

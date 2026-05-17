@@ -6,7 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fetch_account_records import DEFAULT_CONFIG_PATH, load_fetch_jobs, main, run_fetch_job, run_fetch_jobs, run_fetch_platform
+from fetch_account_records import (
+    DEFAULT_CONFIG_PATH,
+    build_default_output_path,
+    load_fetch_jobs,
+    main,
+    run_fetch_job,
+    run_fetch_jobs,
+    run_fetch_platform,
+)
 
 
 class FakeFetcher:
@@ -127,6 +135,46 @@ class FetchAccountRecordsTests(unittest.TestCase):
         self.assertEqual(fetcher.calls[0]["platform"], "TAOBAO")
         self.assertEqual(fetcher.calls[0]["data_type"], "TAOBAO_ACCOUNT_RECORD")
         self.assertEqual(fetcher.calls[0]["page_size"], 50)
+
+    def test_run_fetch_job_uses_chinese_platform_bill_type_and_source_type_output_path(self):
+        response = {"success": True, "data": {"content": [], "total": 0}}
+        fetcher = FakeFetcher(response)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+
+            output_path, _ = run_fetch_job("taobao", config_path=config_path, fetcher=fetcher)
+
+            written = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            output_path,
+            Path(tmpdir) / "inputs" / "淘宝" / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json",
+        )
+        self.assertEqual(written, response)
+
+    def test_build_default_output_path_uses_expected_names_from_default_config(self):
+        jobs = load_fetch_jobs(DEFAULT_CONFIG_PATH)
+
+        self.assertEqual(
+            build_default_output_path(jobs["tb_whale_account_record"]),
+            Path("inputs") / "淘宝" / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.json",
+        )
+        self.assertEqual(
+            build_default_output_path(jobs["alibaba_alipay_account_record"]),
+            Path("inputs") / "1688" / "1688-支付宝账单-ALIBABA_ALIPAY_ACCOUNT_RECORD.json",
+        )
+        self.assertEqual(
+            build_default_output_path(jobs["jingdong_insurance_bill"]),
+            Path("inputs") / "京东" / "京东-保险费明细-JINGDONG_INSURANCE_BILL.json",
+        )
+        self.assertEqual(
+            build_default_output_path(jobs["kuaishou_account_bill"]),
+            Path("inputs") / "快手" / "快手-资金账单明细-KUAISHOU_ACCOUNT_BILL.json",
+        )
+        self.assertEqual(
+            build_default_output_path({"platform": "DOU", "data_type": "DOU_SHOP_ACCOUNT_ITEM"}),
+            Path("inputs") / "抖店" / "抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM.json",
+        )
 
     def test_run_fetch_job_allows_time_and_output_overrides(self):
         response = {"success": True, "data": {"content": [], "total": 0}}

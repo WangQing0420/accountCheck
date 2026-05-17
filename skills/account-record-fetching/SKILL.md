@@ -28,7 +28,16 @@ python3 fetch_account_records.py dou_shop_account_item \
   --end-time "2026-05-13 23:59:59"
 ```
 
-输出：`inputs/<platform>/..._check_result.json`
+默认输出：`inputs/<中文平台>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
+
+示例：`inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json`
+
+## 分页行为
+
+- 默认抓取所有页。
+- 先抓完外层商家列表页，即合并所有 `data.content[]`。
+- 再按每个商家的 `pagedRecords.totalPage` / `total` 抓完该商家的账单明细页。
+- `--single-page` 只用于接口调试，不用于刷新完整 inputs。
 
 ## 验证
 

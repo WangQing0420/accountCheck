@@ -128,6 +128,15 @@ class AccountRecordFetcher:
 
             current_page += 1
 
+        self._complete_user_record_pages(
+            combined_content,
+            platform=platform,
+            data_type=data_type,
+            start_time=start_time,
+            end_time=end_time,
+            node_id=node_id,
+        )
+
         if first_response is None:
             return {}
         first_data = first_response.setdefault("data", {})
@@ -140,6 +149,76 @@ class AccountRecordFetcher:
     def _post_check_all_user(self, platform: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         headers = auth_headers(token, platform)
         return self.http_client.post_json(self._url("/api/accountRecordCheckResult/checkAllUser"), payload, headers)
+
+    def _complete_user_record_pages(
+        self,
+        users: list[Any],
+        *,
+        platform: str,
+        data_type: str,
+        start_time: str,
+        end_time: str,
+        node_id: int,
+    ) -> None:
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            paged_records = user.get("pagedRecords")
+            if not isinstance(paged_records, dict):
+                continue
+
+            content = paged_records.get("content", [])
+            if not isinstance(content, list):
+                content = []
+            current_page = parse_optional_int(paged_records.get("pageNumber")) or 1
+            record_page_size = parse_optional_int(paged_records.get("pageSize")) or len(content) or 1
+            total_page = parse_optional_int(paged_records.get("totalPage"))
+            total = parse_optional_int(paged_records.get("total"))
+            if total_page is None and total is not None:
+                total_page = (total + record_page_size - 1) // record_page_size
+            if total_page is None or current_page >= total_page:
+                continue
+
+            user_id_or_nick = record_page_user_id_or_nick(user)
+            if not user_id_or_nick:
+                continue
+
+            combined_records = list(content)
+            next_page = current_page + 1
+            while next_page <= total_page:
+                response = self.fetch_check_all_user(
+                    platform=platform,
+                    data_type=data_type,
+                    start_time=start_time,
+                    end_time=end_time,
+                    page_size=record_page_size,
+                    page_number=next_page,
+                    user_id_or_nick=user_id_or_nick,
+                    node_id=node_id,
+                )
+                next_paged_records = find_user_paged_records(response, user)
+                if next_paged_records is None:
+                    break
+
+                page_content = next_paged_records.get("content", [])
+                if not isinstance(page_content, list):
+                    page_content = []
+                combined_records.extend(page_content)
+
+                next_total = parse_optional_int(next_paged_records.get("total"))
+                if next_total is not None:
+                    total = next_total
+                    paged_records["total"] = next_total
+                next_total_page = parse_optional_int(next_paged_records.get("totalPage"))
+                if next_total_page is not None:
+                    total_page = next_total_page
+                    paged_records["totalPage"] = next_total_page
+
+                if not page_content:
+                    break
+                next_page += 1
+
+            paged_records["content"] = combined_records
 
     def _url(self, path: str) -> str:
         return f"{self.settings.base_url.rstrip('/')}{path}"
@@ -191,6 +270,51 @@ def parse_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def record_page_user_id_or_nick(user: dict[str, Any]) -> str:
+    for key in ("userId", "user_id", "nick", "userNick"):
+        value = user.get(key)
+        if value not in {None, ""}:
+            return str(value)
+    return ""
+
+
+def find_user_paged_records(response: dict[str, Any], user: dict[str, Any]) -> dict[str, Any] | None:
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return None
+    content = data.get("content", [])
+    if not isinstance(content, list):
+        return None
+
+    fallback: dict[str, Any] | None = None
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        paged_records = item.get("pagedRecords")
+        if not isinstance(paged_records, dict):
+            continue
+        if fallback is None:
+            fallback = paged_records
+        if is_same_user(item, user):
+            return paged_records
+    return fallback
+
+
+def is_same_user(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    for key in ("userId", "user_id"):
+        left_value = left.get(key)
+        right_value = right.get(key)
+        if left_value not in {None, ""} and right_value not in {None, ""}:
+            return str(left_value) == str(right_value)
+
+    for key in ("nick", "userNick"):
+        left_value = left.get(key)
+        right_value = right.get(key)
+        if left_value not in {None, ""} and right_value not in {None, ""}:
+            return str(left_value) == str(right_value)
+    return False
 
 
 def load_dotenv(path: Path) -> dict[str, str]:

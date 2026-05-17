@@ -30,6 +30,50 @@ PLATFORM_ALIASES = {
     "xhs": "XHS",
     "wxxd": "WXXD",
 }
+PLATFORM_OUTPUT_LABELS = {
+    "TAOBAO": "淘宝",
+    "ALIBABA": "1688",
+    "PDD": "拼多多",
+    "KUAISHOU": "快手",
+    "JINGDONG": "京东",
+    "DOU": "抖店",
+    "XHS": "小红书",
+    "WXXD": "微信小店",
+}
+SOURCE_TYPE_BILL_LABELS = {
+    "TAOBAO_ACCOUNT_RECORD": "通用账单",
+    "TB_WHALE_ACCOUNT_RECORD": "聚合结算账单明细",
+    "TAOBAO_HAIWAI_ACCOUNT_RECORD": "国际支付宝账单明细",
+    "TB_ALIPAY_SMALL_TRANSFER_ACCOUNT_RECORD": "小额打款",
+    "ALIBABA_ALIPAY_ACCOUNT_RECORD": "支付宝账单",
+    "PDD_MALL_ACCOUNT_RECORD": "货款账单",
+    "PDD_MARKETING_ACCOUNT_RECORD": "营销账单",
+    "PDD_MARKETING_ACTIVITY_SETTLEMENT_DETAIL": "营销活动结算对账单",
+    "KUAISHOU_DEPOSIT_BILL": "保证金明细",
+    "KUAISHOU_ACCOUNT_BILL": "资金账单明细",
+    "KUAISHOU_ORDER_FLOW_DETAIL": "订单流水明细",
+    "JINGDONG_INSURANCE_BILL": "保险费明细",
+    "JINGDONG_LEDGER_BILL_DETAIL": "商家账单明细",
+    "DOU_ORDER_SETTLE_BILL_DETAIL": "结算账单明细",
+    "DOU_SHOP_ACCOUNT_ITEM": "资金流水账单",
+    "DOU_DEPOSIT_BILL": "保证金明细",
+    "DOU_MANAGER_ACCOUNT_DETAIL": "管家账户明细",
+    "DOU_INSURANCE_BILL": "保险费明细",
+    "XHS_SELLER_ACCOUNT_RECORD": "货款动账流水",
+    "XHS_TRANSACTION": "订单结算货款",
+    "WXXD_FUNDS_FLOW_DETAIL": "资金流水账单",
+}
+DISPLAY_NAME_PLATFORM_PREFIXES = (
+    "淘宝",
+    "1688",
+    "阿里巴巴",
+    "拼多多",
+    "快手",
+    "京东",
+    "抖店",
+    "小红书",
+    "微信小店",
+)
 
 
 class FetchJobError(RuntimeError):
@@ -87,7 +131,8 @@ def run_fetch_job(
         job["start_time"] = start_time
     if end_time is not None:
         job["end_time"] = end_time
-    if output is not None:
+    explicit_output = output is not None
+    if explicit_output:
         job["output"] = str(output)
     if page_size is not None:
         job["page_size"] = page_size
@@ -98,7 +143,7 @@ def run_fetch_job(
     if node_id is not None:
         job["node_id"] = node_id
 
-    require_job_fields(job_name, job, ["platform", "data_type", "start_time", "end_time", "output"])
+    require_job_fields(job_name, job, ["platform", "data_type", "start_time", "end_time"])
 
     active_fetcher = fetcher or AccountRecordFetcher(load_settings(env_path))
     node_ids = node_ids_for_job(job)
@@ -108,7 +153,7 @@ def run_fetch_job(
     ]
     response = responses[0] if len(responses) == 1 else merge_node_responses(responses, node_ids)
 
-    output_path = Path(str(job["output"]))
+    output_path = Path(str(job["output"])) if explicit_output else build_default_output_path(job)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_output(output_path, response)
     return output_path, response
@@ -195,6 +240,57 @@ def run_fetch_platform(
 
 def platform_for_alias(value: str) -> str | None:
     return PLATFORM_ALIASES.get(value.lower())
+
+
+def build_default_output_path(job: dict[str, Any]) -> Path:
+    platform_label = output_platform_label(job)
+    source_type = output_source_type(job)
+    bill_label = output_bill_label(job, platform_label, source_type)
+    filename = f"{platform_label}-{bill_label}-{source_type}.json"
+    return output_root_for_job(job) / safe_path_part(platform_label) / safe_path_part(filename)
+
+
+def output_platform_label(job: dict[str, Any]) -> str:
+    platform = str(job.get("platform", "")).upper()
+    return PLATFORM_OUTPUT_LABELS.get(platform, platform or "UNKNOWN")
+
+
+def output_source_type(job: dict[str, Any]) -> str:
+    source_type = str(job.get("source_type") or job.get("data_type") or "UNKNOWN")
+    return safe_path_part(source_type)
+
+
+def output_bill_label(job: dict[str, Any], platform_label: str, source_type: str) -> str:
+    if job.get("bill_type"):
+        return safe_path_part(str(job["bill_type"]))
+    if job.get("bill_name"):
+        return safe_path_part(str(job["bill_name"]))
+    if source_type in SOURCE_TYPE_BILL_LABELS:
+        return SOURCE_TYPE_BILL_LABELS[source_type]
+
+    display_name = str(job.get("display_name", "")).strip()
+    for prefix in (platform_label, *DISPLAY_NAME_PLATFORM_PREFIXES):
+        if display_name.startswith(prefix):
+            display_name = display_name[len(prefix):].strip()
+            break
+    return safe_path_part(display_name or source_type)
+
+
+def output_root_for_job(job: dict[str, Any]) -> Path:
+    output = job.get("output")
+    if not output:
+        return Path("inputs")
+
+    output_path = Path(str(output))
+    parts = output_path.parts
+    for index, part in enumerate(parts):
+        if part == "inputs":
+            return Path(*parts[: index + 1])
+    return output_path.parent
+
+
+def safe_path_part(value: str) -> str:
+    return value.replace("/", "-").replace("\\", "-").strip()
 
 
 def node_ids_for_job(job: dict[str, Any]) -> list[int]:

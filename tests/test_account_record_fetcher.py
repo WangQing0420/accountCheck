@@ -179,6 +179,85 @@ class FetcherTests(unittest.TestCase):
         self.assertEqual(client.calls[0]["payload"]["pageNumber"], 1)
         self.assertEqual(client.calls[1]["payload"]["pageNumber"], 2)
 
+    def test_fetch_all_users_fetches_all_paged_records_for_each_user(self):
+        client = FakeHttpClient(
+            [
+                {
+                    "success": True,
+                    "code": 200,
+                    "message": "OK",
+                    "data": {
+                        "content": [
+                            {
+                                "userId": 1,
+                                "nick": "shop-a",
+                                "pagedRecords": {
+                                    "content": [{"id": "r1"}, {"id": "r2"}],
+                                    "pageNumber": 1,
+                                    "pageSize": 2,
+                                    "total": 3,
+                                    "totalPage": 2,
+                                },
+                            },
+                            {
+                                "userId": 2,
+                                "nick": "shop-b",
+                                "pagedRecords": {
+                                    "content": [{"id": "s1"}],
+                                    "pageNumber": 1,
+                                    "pageSize": 2,
+                                    "total": 1,
+                                    "totalPage": 1,
+                                },
+                            },
+                        ],
+                        "total": 2,
+                    },
+                },
+                {
+                    "success": True,
+                    "code": 200,
+                    "message": "OK",
+                    "data": {
+                        "content": [
+                            {
+                                "userId": 1,
+                                "nick": "shop-a",
+                                "pagedRecords": {
+                                    "content": [{"id": "r3"}],
+                                    "pageNumber": 2,
+                                    "pageSize": 2,
+                                    "total": 3,
+                                    "totalPage": 2,
+                                },
+                            }
+                        ],
+                        "total": 1,
+                    },
+                },
+            ]
+        )
+        fetcher = AccountRecordFetcher(self.settings(), client)
+
+        result = fetcher.fetch_check_all_users(
+            platform="TAOBAO",
+            data_type="TAOBAO_ACCOUNT_RECORD",
+            start_time="2026-04-23 00:00:00",
+            end_time="2026-05-07 23:59:59",
+            page_size=10,
+        )
+
+        users = result["data"]["content"]
+        self.assertEqual(users[0]["pagedRecords"]["content"], [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}])
+        self.assertEqual(users[0]["pagedRecords"]["pageNumber"], 1)
+        self.assertEqual(users[0]["pagedRecords"]["total"], 3)
+        self.assertEqual(users[0]["pagedRecords"]["totalPage"], 2)
+        self.assertEqual(users[1]["pagedRecords"]["content"], [{"id": "s1"}])
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(client.calls[1]["payload"]["userIdOrNick"], "1")
+        self.assertEqual(client.calls[1]["payload"]["pageNumber"], 2)
+        self.assertEqual(client.calls[1]["payload"]["pageSize"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

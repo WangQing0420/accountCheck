@@ -43,7 +43,7 @@ class TargetResolutionTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
-    def test_run_pipeline_fetches_inputs_and_generates_split_reports(self):
+    def test_run_pipeline_fetches_inputs_and_generates_group_report(self):
         response = {
             "success": True,
             "code": 200,
@@ -61,27 +61,12 @@ class PipelineTests(unittest.TestCase):
                 ]
             },
         }
-        seed_content = """
-account_expense_types = [
-  { parent_id: 1000, parent_name: '平台扣点', actives: [
-    { types: [[1301, '基础软件服务费']] },
-  ] },
-]
-
-account_record_types = {
-  130100 => { name: '基础软件服务费归类', match_rule: { memo: '基础软件服务费.*' }, expense_type_id: 1301, source_type: :TAOBAO_ACCOUNT_RECORD, sort_order: 90 },
-}
-"""
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            rails_root = root / "rails"
-            seed_dir = rails_root / "db" / "seeds" / "static" / "taobao"
-            seed_dir.mkdir(parents=True, exist_ok=True)
-            (seed_dir / "account_expense_type.seeds.rb").write_text(seed_content, encoding="utf-8")
-
-            input_path = root / "inputs" / "taobao" / "taobao_check_result.json"
-            input_path.parent.mkdir(parents=True, exist_ok=True)
+            configured_input_path = root / "inputs" / "taobao" / "taobao_check_result.json"
+            input_path = root / "inputs" / "淘宝" / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            configured_input_path.parent.mkdir(parents=True, exist_ok=True)
             config_path = root / "fetch_jobs.json"
             config_path.write_text(
                 json.dumps(
@@ -95,7 +80,7 @@ account_record_types = {
                                 "platform": "TAOBAO",
                                 "source_type": "TAOBAO_ACCOUNT_RECORD",
                                 "data_type": "TAOBAO_ACCOUNT_RECORD",
-                                "output": str(input_path),
+                                "output": str(configured_input_path),
                             }
                         }
                     },
@@ -111,20 +96,23 @@ account_record_types = {
                 config_path=config_path,
                 env_path=root / ".env",
                 output_root=root / "outputs",
-                rails_root=rails_root,
-                fetch_jobs_path=config_path,
                 fetcher=fetcher,
             )
 
             self.assertEqual(failures, [])
             self.assertEqual(len(results), 1)
             self.assertTrue(input_path.exists())
-            report_path = root / "outputs" / "taobao" / "taobao_check_result" / "classification_required_platform_fee.md"
+            report_path = (
+                root
+                / "outputs"
+                / "淘宝"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md"
+            )
             self.assertTrue(report_path.exists())
             report = report_path.read_text(encoding="utf-8")
-            self.assertIn("已命中规则: 130100", report)
-            self.assertIn("新增候选", report)
-            self.assertIn("基础软件服务费归类", report)
+            self.assertIn("# 记录相似分组报告", report)
+            self.assertIn("### 分组 1: 1 行", report)
+            self.assertIn("基础软件服务费(*)", report)
             self.assertIn("新平台服务费", report)
             self.assertEqual(len(fetcher.calls), 1)
 
