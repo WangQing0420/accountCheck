@@ -4,8 +4,8 @@
 
 ## 目录
 
-- 输入：`inputs/<中文平台>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
-- 输出：`outputs/<中文平台>/<bill_json_stem>.md`
+- 输入：`inputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
+- 输出：`outputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<bill_json_stem>.md`
 - 配置：`fetch_jobs.json`
 - token：`.env`，不要打印或提交
 
@@ -28,16 +28,16 @@ python3 fetch_account_records.py --all
 ## 分组
 
 ```bash
-python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json --output outputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
+python3 classify_records.py inputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json --output outputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
 python3 classify_records.py 淘宝
 python3 classify_records.py taobao
-python3 classify_records.py inputs/淘宝
+python3 classify_records.py inputs/淘宝（20260503至20260517）
 ```
 
 传平台名或平台目录时会处理该平台下所有 JSON，并自动生成：
 
 ```text
-outputs/<中文平台>/<bill_json_stem>.md
+outputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<bill_json_stem>.md
 ```
 
 ### outputs 展示格式

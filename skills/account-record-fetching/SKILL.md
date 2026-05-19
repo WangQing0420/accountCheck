@@ -28,9 +28,11 @@ python3 fetch_account_records.py dou_shop_account_item \
   --end-time "2026-05-13 23:59:59"
 ```
 
-默认输出：`inputs/<中文平台>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
+默认输出：`inputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
 
-示例：`inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json`
+示例：`inputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json`
+
+平台目录里的时间范围来自 `start_time` / `end_time`。显式传 `--output` 时使用调用方给定路径。
 
 ## 分页行为
 

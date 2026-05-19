@@ -283,11 +283,24 @@ def resolve_input_paths(target: Path, input_root: Path = Path("inputs")) -> list
         raise FileNotFoundError(f"Input JSON not found: {target}")
 
     platform_dir = input_root / resolve_platform_directory_name(str(target))
-    if not platform_dir.is_dir():
+    platform_dirs = matching_platform_directories(platform_dir, input_root)
+    if not platform_dirs:
         available = ", ".join(path.name for path in sorted(input_root.iterdir()) if path.is_dir()) if input_root.is_dir() else ""
         suffix = f" Available platforms: {available}" if available else ""
         raise FileNotFoundError(f"Input platform directory not found: {platform_dir}.{suffix}")
-    return sorted(path for path in platform_dir.glob("*.json") if path.is_file())
+    input_paths: list[Path] = []
+    for active_platform_dir in platform_dirs:
+        input_paths.extend(path for path in active_platform_dir.glob("*.json") if path.is_file())
+    return sorted(input_paths)
+
+
+def matching_platform_directories(platform_dir: Path, input_root: Path) -> list[Path]:
+    if platform_dir.is_dir():
+        return [platform_dir]
+    if not input_root.is_dir():
+        return []
+    dated_prefix = f"{platform_dir.name}（"
+    return sorted(path for path in input_root.iterdir() if path.is_dir() and path.name.startswith(dated_prefix))
 
 
 def resolve_platform_directory_name(value: str) -> str:

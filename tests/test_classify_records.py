@@ -226,6 +226,48 @@ class CliTests(unittest.TestCase):
             self.assertTrue(report_path.exists())
             self.assertIn("订单货款*", report_path.read_text(encoding="utf-8"))
 
+    def test_main_writes_reports_for_dated_platform_alias_directory(self):
+        data = {
+            "success": True,
+            "data": {
+                "content": [
+                    {
+                        "pagedRecords": {
+                            "content": [
+                                {"id": "1", "memo": "订单货款1234567890123456", "inAmount": 50},
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "inputs" / "淘宝（20260503至20260517）"
+            input_dir.mkdir(parents=True)
+            (input_dir / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.json").write_text(
+                json.dumps(data, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with redirect_stdout(StringIO()):
+                    exit_code = main(["taobao"])
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(exit_code, 0)
+            report_path = (
+                root
+                / "outputs"
+                / "淘宝（20260503至20260517）"
+                / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.md"
+            )
+            self.assertTrue(report_path.exists())
+            self.assertIn("订单货款*", report_path.read_text(encoding="utf-8"))
+
     def test_output_is_rejected_for_platform_batch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

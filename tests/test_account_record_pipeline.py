@@ -65,7 +65,12 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             configured_input_path = root / "inputs" / "taobao" / "taobao_check_result.json"
-            input_path = root / "inputs" / "淘宝" / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            input_path = (
+                root
+                / "inputs"
+                / "淘宝（20260501至20260513）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
             configured_input_path.parent.mkdir(parents=True, exist_ok=True)
             config_path = root / "fetch_jobs.json"
             config_path.write_text(
@@ -105,7 +110,7 @@ class PipelineTests(unittest.TestCase):
             report_path = (
                 root
                 / "outputs"
-                / "淘宝"
+                / "淘宝（20260501至20260513）"
                 / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md"
             )
             self.assertTrue(report_path.exists())

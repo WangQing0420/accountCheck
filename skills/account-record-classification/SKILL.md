@@ -10,8 +10,8 @@ description: 用于在 account_check 项目中对单个账单检查结果 JSON �
 ## 常用命令
 
 ```bash
-python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json \
-  --output outputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
+python3 classify_records.py inputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json \
+  --output outputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
 ```
 
 也可以跑一个平台下所有 JSON：
@@ -19,10 +19,11 @@ python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_REC
 ```bash
 python3 classify_records.py 淘宝
 python3 classify_records.py taobao
-python3 classify_records.py inputs/淘宝
+python3 classify_records.py inputs/淘宝（20260503至20260517）
 ```
 
-不传 `--output` 且输入是单个 JSON 时报告输出到 stdout。`--output` 只适用于单个 JSON；跑平台或目录时会自动写入 `outputs/<平台>/<bill_json_stem>.md`。
+不传 `--output` 且输入是单个 JSON 时报告输出到 stdout。`--output` 只适用于单个 JSON；跑平台或目录时会自动写入 `outputs/<平台或带时间范围的平台>/<bill_json_stem>.md`。
+平台名和平台别名会兼容带时间范围的 inputs 目录，例如 `inputs/淘宝（...）`。
 
 ## 输出格式
 

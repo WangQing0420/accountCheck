@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from fetch_account_records import (
     run_fetch_job,
     run_fetch_jobs,
     run_fetch_platform,
+    stderr_progress,
 )
 
 
@@ -42,6 +44,7 @@ class FakeMultiNodeFetcher:
             "success": True,
             "data": {
                 "content": [{"userId": node_id * 100}],
+                "pages": [{"content": [{"userId": node_id * 100}], "pageNumber": 1, "pageSize": 50}],
                 "total": 1,
                 "totalPage": 1,
             },
@@ -58,6 +61,107 @@ class FakeMultiNodeFetcher:
                 "totalPage": 1,
             },
         }
+
+
+class FakeFailingSecondNodeFetcher:
+    def __init__(self):
+        self.calls = []
+
+    def fetch_check_all_users(self, **kwargs):
+        self.calls.append({"all_pages": True, **kwargs})
+        node_id = kwargs["node_id"]
+        if node_id == 1:
+            return {
+                "success": True,
+                "data": {
+                    "content": [{"userId": 100}],
+                    "pages": [{"content": [{"userId": 100}], "pageNumber": 1, "pageSize": 50}],
+                    "total": 1,
+                    "totalPage": 1,
+                },
+            }
+        raise OSError("network dropped")
+
+
+class FakePartialFetchError(Exception):
+    def __init__(self, message, partial_response):
+        super().__init__(message)
+        self.partial_response = partial_response
+
+
+class FakeFailingFirstNodeWithPartialFetcher:
+    def __init__(self):
+        self.calls = []
+
+    def fetch_check_all_users(self, **kwargs):
+        self.calls.append({"all_pages": True, **kwargs})
+        raise FakePartialFetchError(
+            "network dropped",
+            {
+                "success": True,
+                "data": {
+                    "content": [{"userId": 100}],
+                    "pages": [{"content": [{"userId": 100}], "pageNumber": 1, "pageSize": 50}],
+                    "total": 2,
+                    "totalPage": 2,
+                },
+            },
+        )
+
+
+class BlockingMultiNodeFetcher:
+    def __init__(self):
+        self.calls = []
+        self.lock = threading.Lock()
+        self.node_one_started = threading.Event()
+        self.node_two_started = threading.Event()
+
+    def fetch_check_all_users(self, **kwargs):
+        node_id = kwargs["node_id"]
+        with self.lock:
+            self.calls.append({"all_pages": True, **kwargs})
+        if node_id == 1:
+            self.node_one_started.set()
+            if not self.node_two_started.wait(timeout=1):
+                raise AssertionError("node 2 did not start while node 1 was still running")
+        if node_id == 2:
+            if not self.node_one_started.wait(timeout=1):
+                raise AssertionError("node 1 did not start before node 2")
+            self.node_two_started.set()
+        return {
+            "success": True,
+            "data": {
+                "content": [{"userId": node_id * 100}],
+                "pages": [{"content": [{"userId": node_id * 100}], "pageNumber": 1, "pageSize": 50}],
+                "total": 1,
+                "totalPage": 1,
+            },
+        }
+
+
+class ConcurrentFailingSecondNodeFetcher:
+    def __init__(self):
+        self.calls = []
+        self.lock = threading.Lock()
+        self.node_one_done = threading.Event()
+
+    def fetch_check_all_users(self, **kwargs):
+        node_id = kwargs["node_id"]
+        with self.lock:
+            self.calls.append({"all_pages": True, **kwargs})
+        if node_id == 1:
+            self.node_one_done.set()
+            return {
+                "success": True,
+                "data": {
+                    "content": [{"userId": 100}],
+                    "pages": [{"content": [{"userId": 100}], "pageNumber": 1, "pageSize": 50}],
+                    "total": 1,
+                    "totalPage": 1,
+                },
+            }
+        self.node_one_done.wait(timeout=1)
+        raise OSError("network dropped")
 
 
 class FetchAccountRecordsTests(unittest.TestCase):
@@ -148,32 +252,52 @@ class FetchAccountRecordsTests(unittest.TestCase):
 
         self.assertEqual(
             output_path,
-            Path(tmpdir) / "inputs" / "淘宝" / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json",
+            Path(tmpdir)
+            / "inputs"
+            / "淘宝（20260423至20260507）"
+            / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json",
         )
         self.assertEqual(written, response)
 
-    def test_build_default_output_path_uses_expected_names_from_default_config(self):
+    def test_build_default_output_path_uses_expected_names_and_time_range_from_default_config(self):
         jobs = load_fetch_jobs(DEFAULT_CONFIG_PATH)
 
         self.assertEqual(
             build_default_output_path(jobs["tb_whale_account_record"]),
-            Path("inputs") / "淘宝" / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.json",
+            Path("inputs")
+            / "淘宝（20260503至20260517）"
+            / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["alibaba_alipay_account_record"]),
-            Path("inputs") / "1688" / "1688-支付宝账单-ALIBABA_ALIPAY_ACCOUNT_RECORD.json",
+            Path("inputs")
+            / "1688（20260503至20260517）"
+            / "1688-支付宝账单-ALIBABA_ALIPAY_ACCOUNT_RECORD.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["jingdong_insurance_bill"]),
-            Path("inputs") / "京东" / "京东-保险费明细-JINGDONG_INSURANCE_BILL.json",
+            Path("inputs")
+            / "京东（20260503至20260517）"
+            / "京东-保险费明细-JINGDONG_INSURANCE_BILL.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["kuaishou_account_bill"]),
-            Path("inputs") / "快手" / "快手-资金账单明细-KUAISHOU_ACCOUNT_BILL.json",
+            Path("inputs")
+            / "快手（20260503至20260517）"
+            / "快手-资金账单明细-KUAISHOU_ACCOUNT_BILL.json",
         )
         self.assertEqual(
-            build_default_output_path({"platform": "DOU", "data_type": "DOU_SHOP_ACCOUNT_ITEM"}),
-            Path("inputs") / "抖店" / "抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM.json",
+            build_default_output_path(
+                {
+                    "platform": "DOU",
+                    "data_type": "DOU_SHOP_ACCOUNT_ITEM",
+                    "start_time": "2026-05-03 00:00:00",
+                    "end_time": "2026-05-17 23:59:59",
+                }
+            ),
+            Path("inputs")
+            / "抖店（20260503至20260517）"
+            / "抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM.json",
         )
 
     def test_run_fetch_job_allows_time_and_output_overrides(self):
@@ -207,7 +331,115 @@ class FetchAccountRecordsTests(unittest.TestCase):
         self.assertEqual([call["node_id"] for call in fetcher.calls], [1, 2])
         self.assertEqual(result["data"]["total"], 2)
         self.assertEqual(result["data"]["content"], [{"userId": 100, "nodeId": 1}, {"userId": 200, "nodeId": 2}])
+        self.assertEqual(
+            result["data"]["pages"],
+            [
+                {"content": [{"userId": 100, "nodeId": 1}], "pageNumber": 1, "pageSize": 50, "nodeId": 1},
+                {"content": [{"userId": 200, "nodeId": 2}], "pageNumber": 1, "pageSize": 50, "nodeId": 2},
+            ],
+        )
         self.assertEqual(written, result)
+
+    def test_run_fetch_job_can_fetch_nodes_concurrently_and_merge_in_config_order(self):
+        fetcher = BlockingMultiNodeFetcher()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir, node_ids=[1, 2])
+
+            _, result = run_fetch_job("taobao", config_path=config_path, fetcher=fetcher, node_workers=2)
+
+        self.assertEqual(result["data"]["nodeIds"], [1, 2])
+        self.assertEqual(result["data"]["content"], [{"userId": 100, "nodeId": 1}, {"userId": 200, "nodeId": 2}])
+
+    def test_run_fetch_job_reports_job_and_node_progress(self):
+        fetcher = FakeMultiNodeFetcher()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir, node_ids=[1, 2])
+            messages = []
+
+            run_fetch_job("taobao", config_path=config_path, fetcher=fetcher, progress=messages.append)
+
+        self.assertEqual(
+            messages,
+            [
+                "job start name=taobao platform=TAOBAO data_type=TAOBAO_ACCOUNT_RECORD nodes=2 "
+                "time_range='2026-04-23 00:00:00'..'2026-05-07 23:59:59'",
+                "node start job=taobao node=1/2 node_id=1",
+                "node done job=taobao node=1/2 node_id=1 users=1 pages=1 total=1",
+                "node start job=taobao node=2/2 node_id=2",
+                "node done job=taobao node=2/2 node_id=2 users=1 pages=1 total=1",
+            ],
+        )
+
+    def test_run_fetch_job_writes_partial_output_when_later_node_fails(self):
+        fetcher = FakeFailingSecondNodeFetcher()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir, node_ids=[1, 2])
+            output_path = (
+                Path(tmpdir)
+                / "inputs"
+                / "淘宝（20260423至20260507）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
+            partial_path = output_path.with_name(f"{output_path.stem}.partial{output_path.suffix}")
+
+            with self.assertRaises(OSError):
+                run_fetch_job("taobao", config_path=config_path, fetcher=fetcher)
+
+            self.assertTrue(partial_path.exists())
+            written = json.loads(partial_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(output_path.exists())
+        self.assertEqual([call["node_id"] for call in fetcher.calls], [1, 2])
+        self.assertTrue(written["_partialFetch"]["partial"])
+        self.assertIn("network dropped", written["_partialFetch"]["error"])
+        self.assertEqual(written["data"]["nodeIds"], [1])
+        self.assertEqual(written["data"]["content"], [{"userId": 100, "nodeId": 1}])
+
+    def test_run_fetch_job_writes_partial_output_when_concurrent_node_fails(self):
+        fetcher = ConcurrentFailingSecondNodeFetcher()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir, node_ids=[1, 2])
+            output_path = (
+                Path(tmpdir)
+                / "inputs"
+                / "淘宝（20260423至20260507）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
+            partial_path = output_path.with_name(f"{output_path.stem}.partial{output_path.suffix}")
+
+            with self.assertRaises(OSError):
+                run_fetch_job("taobao", config_path=config_path, fetcher=fetcher, node_workers=2)
+
+            self.assertTrue(partial_path.exists())
+            written = json.loads(partial_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(written["data"]["nodeIds"], [1])
+        self.assertEqual(written["data"]["content"], [{"userId": 100, "nodeId": 1}])
+
+    def test_run_fetch_job_writes_current_node_partial_output(self):
+        fetcher = FakeFailingFirstNodeWithPartialFetcher()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir, node_ids=[1, 2])
+            output_path = (
+                Path(tmpdir)
+                / "inputs"
+                / "淘宝（20260423至20260507）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
+            partial_path = output_path.with_name(f"{output_path.stem}.partial{output_path.suffix}")
+
+            with self.assertRaises(FakePartialFetchError):
+                run_fetch_job("taobao", config_path=config_path, fetcher=fetcher)
+
+            self.assertTrue(partial_path.exists())
+            written = json.loads(partial_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(output_path.exists())
+        self.assertEqual([call["node_id"] for call in fetcher.calls], [1])
+        self.assertTrue(written["_partialFetch"]["partial"])
+        self.assertIn("network dropped", written["_partialFetch"]["error"])
+        self.assertEqual(written["data"]["nodeIds"], [1])
+        self.assertEqual(written["data"]["content"], [{"userId": 100, "nodeId": 1}])
 
     def test_run_fetch_job_node_id_override_fetches_one_node(self):
         fetcher = FakeMultiNodeFetcher()
@@ -284,6 +516,17 @@ class FetchAccountRecordsTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
 
+    def test_stderr_progress_prints_timestamped_fetch_prefix(self):
+        stderr = io.StringIO()
+        with (
+            patch("fetch_account_records.datetime") as fake_datetime,
+            contextlib.redirect_stderr(stderr),
+        ):
+            fake_datetime.now.return_value.strftime.return_value = "20260519 14:01:01"
+            stderr_progress("job start name=taobao")
+
+        self.assertEqual(stderr.getvalue(), "[20260519 14:01:01] fetch job start name=taobao\n")
+
     def test_main_all_prints_each_written_job(self):
         results = [
             ("taobao", Path("inputs/taobao/taobao_check_result.json"), {}),
@@ -291,14 +534,18 @@ class FetchAccountRecordsTests(unittest.TestCase):
         ]
 
         stdout = io.StringIO()
-        with patch("fetch_account_records.run_fetch_jobs", return_value=results), contextlib.redirect_stdout(stdout):
+        with (
+            patch("fetch_account_records.run_fetch_jobs", return_value=results),
+            patch("fetch_account_records.time.monotonic", side_effect=[10.0, 11.234]),
+            contextlib.redirect_stdout(stdout),
+        ):
             code = main(["--all"])
 
         self.assertEqual(code, 0)
         self.assertEqual(
             stdout.getvalue(),
-            "Wrote taobao: inputs/taobao/taobao_check_result.json\n"
-            "Wrote pdd_mall_account_record: inputs/pdd/pdd_mall_account_record_check_result.json\n",
+            "Wrote taobao: inputs/taobao/taobao_check_result.json 耗时1.23s\n"
+            "Wrote pdd_mall_account_record: inputs/pdd/pdd_mall_account_record_check_result.json 耗时1.23s\n",
         )
 
     def test_main_platform_alias_prints_each_written_job(self):
@@ -308,14 +555,35 @@ class FetchAccountRecordsTests(unittest.TestCase):
         ]
 
         stdout = io.StringIO()
-        with patch("fetch_account_records.run_fetch_platform", return_value=results), contextlib.redirect_stdout(stdout):
+        with (
+            patch("fetch_account_records.run_fetch_platform", return_value=results),
+            patch("fetch_account_records.time.monotonic", side_effect=[20.0, 20.456]),
+            contextlib.redirect_stdout(stdout),
+        ):
             code = main(["dou"])
 
         self.assertEqual(code, 0)
         self.assertEqual(
             stdout.getvalue(),
-            "Wrote dou_order_settle_bill_detail: inputs/dou/dou_order_settle_bill_detail_check_result.json\n"
-            "Wrote dou_shop_account_item: inputs/dou/dou_shop_account_item_check_result.json\n",
+            "Wrote dou_order_settle_bill_detail: inputs/dou/dou_order_settle_bill_detail_check_result.json 耗时0.46s\n"
+            "Wrote dou_shop_account_item: inputs/dou/dou_shop_account_item_check_result.json 耗时0.46s\n",
+        )
+
+    def test_main_job_prints_written_output_with_elapsed_time(self):
+        output_path = Path("inputs/taobao/taobao_check_result.json")
+
+        stdout = io.StringIO()
+        with (
+            patch("fetch_account_records.run_fetch_job", return_value=(output_path, {})),
+            patch("fetch_account_records.time.monotonic", side_effect=[30.0, 32.5]),
+            contextlib.redirect_stdout(stdout),
+        ):
+            code = main(["taobao_job"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "Wrote inputs/taobao/taobao_check_result.json 耗时2.50s\n",
         )
 
 

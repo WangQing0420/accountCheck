@@ -10,8 +10,8 @@
 ## 目录
 
 ```text
-inputs/<中文平台>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json
-outputs/<中文平台>/<bill_json_stem>.md
+inputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json
+outputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<bill_json_stem>.md
 fetch_jobs.json
 ```
 
@@ -52,10 +52,11 @@ python3 fetch_account_records.py dou --node-id 3
 python3 fetch_account_records.py dou_shop_account_item \
   --start-time "2026-05-01 00:00:00" \
   --end-time "2026-05-13 23:59:59" \
-  --output inputs/抖店/抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM-202605.json
+  --output inputs/抖店（20260501至20260513）/抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM-202605.json
 ```
 
 `--output` 只用于单个具体 job；平台别名和 `--all` 会使用默认 inputs 命名规则输出。
+默认 inputs 目录会根据 `start_time` / `end_time` 加时间范围，例如 `inputs/淘宝（20260503至20260517）/...json`。
 
 分页行为：
 
@@ -89,6 +90,8 @@ python3 fetch_account_records.py dou_shop_account_item \
 }
 ```
 
+配置里的 `output` 只提供 inputs 根目录和历史兼容信息；未显式传 `--output` 时，脚本会自动生成带时间范围的平台目录。
+
 平台别名包括 `taobao`、`alibaba`、`pdd`、`kuaishou`、`jingdong`、`dou`、`xhs`、`wxxd`。
 
 ## Token
@@ -113,8 +116,8 @@ A6M1N_BASE_URL=https://a6m1n.topkjs.com
 对单个 JSON 生成报告：
 
 ```bash
-python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json \
-  --output outputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
+python3 classify_records.py inputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json \
+  --output outputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
 ```
 
 直接跑一个平台下所有 JSON：
@@ -122,16 +125,17 @@ python3 classify_records.py inputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_REC
 ```bash
 python3 classify_records.py 淘宝
 python3 classify_records.py taobao
-python3 classify_records.py inputs/淘宝
+python3 classify_records.py inputs/淘宝（20260503至20260517）
 ```
 
 生成路径示例：
 
 ```text
-outputs/淘宝/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
+outputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.md
 ```
 
-不传 `--output` 且输入是单个 JSON 时，报告输出到 stdout。`--output` 只适用于单个 JSON；跑平台或目录时会自动写入 `outputs/<平台>/<bill_json_stem>.md`。
+不传 `--output` 且输入是单个 JSON 时，报告输出到 stdout。`--output` 只适用于单个 JSON；跑平台或目录时会自动写入 `outputs/<平台或带时间范围的平台>/<bill_json_stem>.md`。
+平台别名也兼容带时间范围的 inputs 目录，例如 `python3 classify_records.py taobao` 会匹配 `inputs/淘宝（...）`。
 
 分组默认使用 `memo`、`bizDesc`、`businessType`、`bizType`、`bizTypeDesc`、`remark`、`feeName`、`accountBillDesc` 等字段，并兼容 `biz_desc`、`business_type` 这类 snake_case 字段。长订单号、长流水号和括号内长数字会归一化为 `*`，例如 `生活费(1234567890123456)` 和 `生活费(2234567890123456)` 会归到同一组。
 
