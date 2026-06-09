@@ -97,6 +97,13 @@
       "source_type": "JINGDONG_LEDGER_BILL_DETAIL",
       "output": "inputs/京东/京东-商家账单明细-JINGDONG_LEDGER_BILL_DETAIL.json"
     },
+    "jingdong_funds_flow_detail": {
+      "display_name": "京东账户流水明细",
+      "platform": "JINGDONG",
+      "data_type": "JINGDONG_FUNDS_FLOW_DETAIL",
+      "source_type": "JINGDONG_FUNDS_FLOW_DETAIL",
+      "output": "inputs/京东/京东-账户流水明细-JINGDONG_FUNDS_FLOW_DETAIL.json"
+    },
     "dou_shop_account_item": {
       "display_name": "抖店资金流水明细",
       "platform": "DOUDIAN",

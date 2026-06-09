@@ -295,6 +295,12 @@ class FetchAccountRecordsTests(unittest.TestCase):
             / "京东-保险费明细-JINGDONG_INSURANCE_BILL.json",
         )
         self.assertEqual(
+            build_default_output_path(jobs["jingdong_funds_flow_detail"]),
+            Path("inputs")
+            / f"京东（{default_range}）"
+            / "京东-账户流水明细-JINGDONG_FUNDS_FLOW_DETAIL.json",
+        )
+        self.assertEqual(
             build_default_output_path(jobs["kuaishou_account_bill"]),
             Path("inputs")
             / f"快手（{default_range}）"
