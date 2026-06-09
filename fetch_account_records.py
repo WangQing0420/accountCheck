@@ -26,21 +26,26 @@ DEFAULT_CONFIG_PATH = Path("fetch_jobs.json")
 PLATFORM_ALIASES = {
     "taobao": "TAOBAO",
     "alibaba": "ALIBABA",
-    "pdd": "PDD",
+    "pdd": "PINDUODUO",
     "kuaishou": "KUAISHOU",
     "jingdong": "JINGDONG",
-    "dou": "DOU",
-    "xhs": "XHS",
+    "dou": "DOUDIAN",
+    "xhs": "XIAOHONGSHU",
     "wxxd": "WXXD",
+}
+PLATFORM_CANONICAL_NAMES = {
+    "PDD": "PINDUODUO",
+    "DOU": "DOUDIAN",
+    "XHS": "XIAOHONGSHU",
 }
 PLATFORM_OUTPUT_LABELS = {
     "TAOBAO": "淘宝",
     "ALIBABA": "1688",
-    "PDD": "拼多多",
+    "PINDUODUO": "拼多多",
     "KUAISHOU": "快手",
     "JINGDONG": "京东",
-    "DOU": "抖店",
-    "XHS": "小红书",
+    "DOUDIAN": "抖店",
+    "XIAOHONGSHU": "小红书",
     "WXXD": "微信小店",
 }
 SOURCE_TYPE_BILL_LABELS = {
@@ -151,6 +156,7 @@ def run_fetch_job(
         job["node_id"] = node_id
 
     require_job_fields(job_name, job, ["platform", "data_type", "start_time", "end_time"])
+    job["platform"] = canonical_platform(str(job["platform"]))
 
     output_path = Path(str(job["output"])) if explicit_output else build_default_output_path(job)
     active_fetcher = fetcher or AccountRecordFetcher(load_settings(env_path), progress=progress)
@@ -307,7 +313,7 @@ def run_fetch_platform(
     active_fetcher = fetcher or AccountRecordFetcher(load_settings(env_path), progress=progress)
     results: list[tuple[str, Path, dict[str, Any]]] = []
     for job_name, job in jobs.items():
-        if str(job.get("platform")) != platform:
+        if canonical_platform(str(job.get("platform"))) != platform:
             continue
         output_path, response = run_fetch_job(
             job_name,
@@ -337,6 +343,11 @@ def platform_for_alias(value: str) -> str | None:
     return PLATFORM_ALIASES.get(value.lower())
 
 
+def canonical_platform(value: str) -> str:
+    platform = value.upper()
+    return PLATFORM_CANONICAL_NAMES.get(platform, platform)
+
+
 def build_default_output_path(job: dict[str, Any]) -> Path:
     platform_label = output_platform_label(job)
     source_type = output_source_type(job)
@@ -346,7 +357,7 @@ def build_default_output_path(job: dict[str, Any]) -> Path:
 
 
 def output_platform_label(job: dict[str, Any]) -> str:
-    platform = str(job.get("platform", "")).upper()
+    platform = canonical_platform(str(job.get("platform", "")))
     return PLATFORM_OUTPUT_LABELS.get(platform, platform or "UNKNOWN")
 
 

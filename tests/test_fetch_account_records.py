@@ -1,22 +1,33 @@
 import contextlib
+import importlib.util
 import io
 import json
+import sys
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fetch_account_records import (
-    DEFAULT_CONFIG_PATH,
-    build_default_output_path,
-    load_fetch_jobs,
-    main,
-    run_fetch_job,
-    run_fetch_jobs,
-    run_fetch_platform,
-    stderr_progress,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+_FETCH_MODULE_PATH = Path(__file__).resolve().parents[1] / "fetch_account_records.py"
+_FETCH_SPEC = importlib.util.spec_from_file_location("fetch_account_records", _FETCH_MODULE_PATH)
+assert _FETCH_SPEC is not None
+assert _FETCH_SPEC.loader is not None
+fetch_account_records = importlib.util.module_from_spec(_FETCH_SPEC)
+sys.modules[_FETCH_SPEC.name] = fetch_account_records
+_FETCH_SPEC.loader.exec_module(fetch_account_records)
+
+DEFAULT_CONFIG_PATH = fetch_account_records.DEFAULT_CONFIG_PATH
+build_default_output_path = fetch_account_records.build_default_output_path
+load_fetch_jobs = fetch_account_records.load_fetch_jobs
+main = fetch_account_records.main
+platform_for_alias = fetch_account_records.platform_for_alias
+run_fetch_job = fetch_account_records.run_fetch_job
+run_fetch_jobs = fetch_account_records.run_fetch_jobs
+run_fetch_platform = fetch_account_records.run_fetch_platform
+stderr_progress = fetch_account_records.stderr_progress
 
 
 class FakeFetcher:
@@ -211,8 +222,8 @@ class FetchAccountRecordsTests(unittest.TestCase):
         jobs = load_fetch_jobs(DEFAULT_CONFIG_PATH)
 
         expected_node_ids_by_platform = {
-            "PDD": [1, 2],
-            "DOU": [1, 2, 3],
+            "PINDUODUO": [1, 2],
+            "DOUDIAN": [1, 2, 3],
             "TAOBAO": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         }
         for job in jobs.values():
@@ -261,35 +272,38 @@ class FetchAccountRecordsTests(unittest.TestCase):
 
     def test_build_default_output_path_uses_expected_names_and_time_range_from_default_config(self):
         jobs = load_fetch_jobs(DEFAULT_CONFIG_PATH)
+        default_start = jobs["tb_whale_account_record"]["start_time"][:10].replace("-", "")
+        default_end = jobs["tb_whale_account_record"]["end_time"][:10].replace("-", "")
+        default_range = f"{default_start}至{default_end}"
 
         self.assertEqual(
             build_default_output_path(jobs["tb_whale_account_record"]),
             Path("inputs")
-            / "淘宝（20260503至20260517）"
+            / f"淘宝（{default_range}）"
             / "淘宝-聚合结算账单明细-TB_WHALE_ACCOUNT_RECORD.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["alibaba_alipay_account_record"]),
             Path("inputs")
-            / "1688（20260503至20260517）"
+            / f"1688（{default_range}）"
             / "1688-支付宝账单-ALIBABA_ALIPAY_ACCOUNT_RECORD.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["jingdong_insurance_bill"]),
             Path("inputs")
-            / "京东（20260503至20260517）"
+            / f"京东（{default_range}）"
             / "京东-保险费明细-JINGDONG_INSURANCE_BILL.json",
         )
         self.assertEqual(
             build_default_output_path(jobs["kuaishou_account_bill"]),
             Path("inputs")
-            / "快手（20260503至20260517）"
+            / f"快手（{default_range}）"
             / "快手-资金账单明细-KUAISHOU_ACCOUNT_BILL.json",
         )
         self.assertEqual(
             build_default_output_path(
                 {
-                    "platform": "DOU",
+                    "platform": "DOUDIAN",
                     "data_type": "DOU_SHOP_ACCOUNT_ITEM",
                     "start_time": "2026-05-03 00:00:00",
                     "end_time": "2026-05-17 23:59:59",
@@ -298,6 +312,19 @@ class FetchAccountRecordsTests(unittest.TestCase):
             Path("inputs")
             / "抖店（20260503至20260517）"
             / "抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM.json",
+        )
+        self.assertEqual(
+            build_default_output_path(
+                {
+                    "platform": "PDD",
+                    "data_type": "PDD_MALL_ACCOUNT_RECORD",
+                    "start_time": "2026-05-03 00:00:00",
+                    "end_time": "2026-05-17 23:59:59",
+                }
+            ),
+            Path("inputs")
+            / "拼多多（20260503至20260517）"
+            / "拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json",
         )
 
     def test_run_fetch_job_allows_time_and_output_overrides(self):
@@ -460,7 +487,7 @@ class FetchAccountRecordsTests(unittest.TestCase):
             config = json.loads(config_path.read_text(encoding="utf-8"))
             config["jobs"]["pdd_mall_account_record"] = {
                 "display_name": "拼多多货款账单明细",
-                "platform": "PDD",
+                "platform": "PINDUODUO",
                 "data_type": "PDD_MALL_ACCOUNT_RECORD",
                 "source_type": "PDD_MALL_ACCOUNT_RECORD",
                 "output": str(Path(tmpdir) / "inputs" / "pdd" / "pdd_mall_account_record_check_result.json"),
@@ -470,8 +497,13 @@ class FetchAccountRecordsTests(unittest.TestCase):
             results = run_fetch_jobs(config_path=config_path, fetcher=fetcher)
 
         self.assertEqual([name for name, _, _ in results], ["taobao", "pdd_mall_account_record"])
-        self.assertEqual([call["platform"] for call in fetcher.calls], ["TAOBAO", "PDD"])
+        self.assertEqual([call["platform"] for call in fetcher.calls], ["TAOBAO", "PINDUODUO"])
         self.assertEqual([call["data_type"] for call in fetcher.calls], ["TAOBAO_ACCOUNT_RECORD", "PDD_MALL_ACCOUNT_RECORD"])
+
+    def test_short_platform_aliases_resolve_to_backend_platform_values(self):
+        self.assertEqual(platform_for_alias("pdd"), "PINDUODUO")
+        self.assertEqual(platform_for_alias("dou"), "DOUDIAN")
+        self.assertEqual(platform_for_alias("xhs"), "XIAOHONGSHU")
 
     def test_run_fetch_platform_fetches_matching_platform_jobs_in_order(self):
         response = {"success": True, "data": {"content": [], "total": 0}}
@@ -481,14 +513,14 @@ class FetchAccountRecordsTests(unittest.TestCase):
             config = json.loads(config_path.read_text(encoding="utf-8"))
             config["jobs"]["dou_order_settle_bill_detail"] = {
                 "display_name": "抖店结算账单明细",
-                "platform": "DOU",
+                "platform": "DOUDIAN",
                 "data_type": "DOU_ORDER_SETTLE_BILL_DETAIL",
                 "source_type": "DOU_ORDER_SETTLE_BILL_DETAIL",
                 "output": str(Path(tmpdir) / "inputs" / "dou" / "dou_order_settle_bill_detail_check_result.json"),
             }
             config["jobs"]["dou_shop_account_item"] = {
                 "display_name": "抖店资金流水明细",
-                "platform": "DOU",
+                "platform": "DOUDIAN",
                 "data_type": "DOU_SHOP_ACCOUNT_ITEM",
                 "source_type": "DOU_SHOP_ACCOUNT_ITEM",
                 "output": str(Path(tmpdir) / "inputs" / "dou" / "dou_shop_account_item_check_result.json"),
@@ -498,7 +530,7 @@ class FetchAccountRecordsTests(unittest.TestCase):
             results = run_fetch_platform("dou", config_path=config_path, fetcher=fetcher)
 
         self.assertEqual([name for name, _, _ in results], ["dou_order_settle_bill_detail", "dou_shop_account_item"])
-        self.assertEqual([call["platform"] for call in fetcher.calls], ["DOU", "DOU"])
+        self.assertEqual([call["platform"] for call in fetcher.calls], ["DOUDIAN", "DOUDIAN"])
         self.assertEqual([call["data_type"] for call in fetcher.calls], ["DOU_ORDER_SETTLE_BILL_DETAIL", "DOU_SHOP_ACCOUNT_ITEM"])
 
     def test_main_all_rejects_single_output_override(self):

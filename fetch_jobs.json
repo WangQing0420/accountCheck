@@ -1,7 +1,7 @@
 {
   "defaults": {
-    "start_time": "2026-04-26 00:00:00",
-    "end_time": "2026-05-02 23:59:59",
+    "start_time": "2026-06-08 00:00:00",
+    "end_time": "2026-06-08 23:59:59",
     "page_size": 50,
     "page_number": 1
   },
@@ -47,7 +47,7 @@
     },
     "pdd_mall_account_record": {
       "display_name": "拼多多货款账单明细",
-      "platform": "PDD",
+      "platform": "PINDUODUO",
       "data_type": "PDD_MALL_ACCOUNT_RECORD",
       "source_type": "PDD_MALL_ACCOUNT_RECORD",
       "node_ids": [1, 2],
@@ -55,7 +55,7 @@
     },
     "pdd_marketing_account_record": {
       "display_name": "拼多多营销账单明细",
-      "platform": "PDD",
+      "platform": "PINDUODUO",
       "data_type": "PDD_MARKETING_ACCOUNT_RECORD",
       "source_type": "PDD_MARKETING_ACCOUNT_RECORD",
       "node_ids": [1, 2],
@@ -63,7 +63,7 @@
     },
     "pdd_marketing_activity_settlement_detail": {
       "display_name": "拼多多营销活动结算对账单",
-      "platform": "PDD",
+      "platform": "PINDUODUO",
       "data_type": "PDD_MARKETING_ACTIVITY_SETTLEMENT_DETAIL",
       "source_type": "PDD_MARKETING_ACTIVITY_SETTLEMENT_DETAIL",
       "node_ids": [1, 2],
@@ -99,7 +99,7 @@
     },
     "dou_shop_account_item": {
       "display_name": "抖店资金流水明细",
-      "platform": "DOU",
+      "platform": "DOUDIAN",
       "data_type": "DOU_SHOP_ACCOUNT_ITEM",
       "source_type": "DOU_SHOP_ACCOUNT_ITEM",
       "node_ids": [1, 2, 3],
@@ -107,7 +107,7 @@
     },
     "dou_deposit_bill": {
       "display_name": "抖店保证金明细",
-      "platform": "DOU",
+      "platform": "DOUDIAN",
       "data_type": "DOU_DEPOSIT_BILL",
       "source_type": "DOU_DEPOSIT_BILL",
       "node_ids": [1, 2, 3],
@@ -115,7 +115,7 @@
     },
     "dou_manager_account_detail": {
       "display_name": "抖店管家账户",
-      "platform": "DOU",
+      "platform": "DOUDIAN",
       "data_type": "DOU_MANAGER_ACCOUNT_DETAIL",
       "source_type": "DOU_MANAGER_ACCOUNT_DETAIL",
       "node_ids": [1, 2, 3],
@@ -123,7 +123,7 @@
     },
     "dou_insurance_bill": {
       "display_name": "抖店保险费明细",
-      "platform": "DOU",
+      "platform": "DOUDIAN",
       "data_type": "DOU_INSURANCE_BILL",
       "source_type": "DOU_INSURANCE_BILL",
       "node_ids": [1, 2, 3],
@@ -131,7 +131,7 @@
     },
     "xhs_seller_account_record": {
       "display_name": "小红书货款动账流水",
-      "platform": "XHS",
+      "platform": "XIAOHONGSHU",
       "data_type": "XHS_SELLER_ACCOUNT_RECORD",
       "source_type": "XHS_SELLER_ACCOUNT_RECORD",
       "output": "inputs/小红书/小红书-货款动账流水-XHS_SELLER_ACCOUNT_RECORD.json"
