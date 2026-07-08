@@ -540,17 +540,11 @@ def page_with_node_id(page: Any, node_id: int) -> Any:
         return page
     copied_page = copy.deepcopy(page)
     copied_page["nodeId"] = node_id
-    content = copied_page.get("content", [])
+    content = copied_page.pop("content", [])
     if isinstance(content, list):
-        copied_content: list[Any] = []
-        for item in content:
-            if isinstance(item, dict):
-                copied_item = copy.deepcopy(item)
-                copied_item["nodeId"] = node_id
-                copied_content.append(copied_item)
-            else:
-                copied_content.append(item)
-        copied_page["content"] = copied_content
+        copied_page.setdefault("contentCount", len(content))
+    else:
+        copied_page.setdefault("contentCount", 0)
     return copied_page
 
 

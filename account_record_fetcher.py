@@ -553,9 +553,8 @@ def elapsed_ms(started_at: float) -> int:
 
 def page_snapshot(data: dict[str, Any], *, page_number: int, page_size: int) -> dict[str, Any]:
     snapshot = copy.deepcopy(data)
-    content = snapshot.get("content", [])
-    if not isinstance(content, list):
-        snapshot["content"] = []
+    content = snapshot.pop("content", [])
+    snapshot["contentCount"] = len(content) if isinstance(content, list) else 0
     snapshot.pop("pages", None)
     snapshot.setdefault("pageNumber", page_number)
     snapshot.setdefault("pageSize", page_size)

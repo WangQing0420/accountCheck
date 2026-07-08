@@ -367,8 +367,8 @@ class FetchAccountRecordsTests(unittest.TestCase):
         self.assertEqual(
             result["data"]["pages"],
             [
-                {"content": [{"userId": 100, "nodeId": 1}], "pageNumber": 1, "pageSize": 50, "nodeId": 1},
-                {"content": [{"userId": 200, "nodeId": 2}], "pageNumber": 1, "pageSize": 50, "nodeId": 2},
+                {"contentCount": 1, "pageNumber": 1, "pageSize": 50, "nodeId": 1},
+                {"contentCount": 1, "pageNumber": 1, "pageSize": 50, "nodeId": 2},
             ],
         )
         self.assertEqual(written, result)
