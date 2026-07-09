@@ -111,6 +111,71 @@ A6M1N_BASE_URL=https://a6m1n.topkjs.com
 
 `.env` 已加入 `.gitignore`。
 
+## 合并时间段
+
+当 `inputs/` 下同一平台有两段时间的数据时，可以用 `merge_input_ranges.py` 按平台和账单类型合并成一个完整时间段。
+
+例如：
+
+```text
+inputs/拼多多（20260611至20260624）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+inputs/拼多多（20260625至20260707）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+```
+
+会合并为：
+
+```text
+inputs/拼多多（20260611至20260707）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+```
+
+使用方法：
+
+```bash
+python3 merge_input_ranges.py
+```
+
+也可以指定 inputs 根目录：
+
+```bash
+python3 merge_input_ranges.py --input-root inputs
+```
+
+合并规则：
+
+- 按目录名解析平台和时间范围，例如 `拼多多（20260611至20260624）`。
+- 同一平台下按文件名匹配账单：`<中文平台>-<账单类型>-<SOURCE_TYPE>.json`。
+- 只合并两边都存在的同名 JSON；只有一边存在的文件会在终端输出 `SKIPPED`。
+- 输出目录使用最早开始日期和最晚结束日期，例如 `inputs/拼多多（20260611至20260707）`。
+- 如果合并目录已经存在，脚本再次运行时会把它视为输出目录，不当作源目录参与合并。
+
+JSON 合并不是简单拼接：
+
+- 外层 `success`、`code`、`message` 和 `data` 结构保持接口返回形状。
+- `data.content[]` 先按商家合并，商家 key 优先使用 `nodeId + userId`，再退到 `userId`、`nodeId`、`nick`。
+- 每个商家的 `pagedRecords.content[]` 再合并账单明细。
+- 明细去重限定在同一个商家内。优先使用 `id`，没有 `id` 时依次尝试 `billNo`、`serialNo`、`flowNo`、`tradeNo`、`orderNo`、`merchantOrderNo`、`transactionId`，最后才用时间、金额、业务类型、备注等字段组成 fallback key。
+- 合并后会重建商家内 `pagedRecords.total`、`totalPage`、`pages`，以及外层 `data.total`、`totalPage`、`pages`、`nodeIds`。
+- 明细会按可识别时间字段排序；没有时间字段时保持原有稳定顺序。
+
+审计统计只输出到终端，不写审计文件，也不会污染账单 JSON：
+
+```text
+MERGED inputs/拼多多（20260611至20260707）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+  left:  inputs/拼多多（20260611至20260624）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+  right: inputs/拼多多（20260625至20260707）/拼多多-货款账单-PDD_MALL_ACCOUNT_RECORD.json
+  merchants: 1 + 0 -> 1
+  records: 1 + 0 = 1 raw
+  duplicates: 0
+  merged records: 1
+  dedupe strategy: merchant scoped id
+```
+
+其中：
+
+- `duplicates = 左右两段明细总数 - 合并后唯一明细数`。
+- `dedupe strategy` 表示实际使用的去重 key 类型，例如 `merchant scoped id`。
+- 如果重复 key 对应的两条记录内容不同，会额外输出 `WARNING duplicate key has different content`。
+
 ## 简单分组
 
 对单个 JSON 生成报告：
