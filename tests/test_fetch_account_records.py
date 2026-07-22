@@ -317,7 +317,7 @@ class FetchAccountRecordsTests(unittest.TestCase):
             ),
             Path("inputs")
             / "抖店（20260503至20260517）"
-            / "抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM.json",
+            / "抖店-资金流水明细-DOU_SHOP_ACCOUNT_ITEM.json",
         )
         self.assertEqual(
             build_default_output_path(

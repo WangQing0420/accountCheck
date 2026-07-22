@@ -52,7 +52,7 @@ python3 fetch_account_records.py dou --node-id 3
 python3 fetch_account_records.py dou_shop_account_item \
   --start-time "2026-05-01 00:00:00" \
   --end-time "2026-05-13 23:59:59" \
-  --output inputs/抖店（20260501至20260513）/抖店-资金流水账单-DOU_SHOP_ACCOUNT_ITEM-202605.json
+  --output inputs/抖店（20260501至20260513）/抖店-资金流水明细-DOU_SHOP_ACCOUNT_ITEM-202605.json
 ```
 
 `--output` 只用于单个具体 job；平台别名和 `--all` 会使用默认 inputs 命名规则输出。

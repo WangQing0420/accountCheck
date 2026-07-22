@@ -121,12 +121,12 @@
       "output": "inputs/抖店/抖店-保证金明细-DOU_DEPOSIT_BILL.json"
     },
     "dou_manager_account_detail": {
-      "display_name": "抖店管家账户",
+      "display_name": "抖店钱包明细",
       "platform": "DOUDIAN",
       "data_type": "DOU_MANAGER_ACCOUNT_DETAIL",
       "source_type": "DOU_MANAGER_ACCOUNT_DETAIL",
       "node_ids": [1, 2, 3],
-      "output": "inputs/抖店/抖店-管家账户明细-DOU_MANAGER_ACCOUNT_DETAIL.json"
+      "output": "inputs/抖店/抖店-抖店钱包明细-DOU_MANAGER_ACCOUNT_DETAIL.json"
     },
     "dou_insurance_bill": {
       "display_name": "抖店保险费明细",
@@ -153,8 +153,8 @@
     "wxxd_deposit_bill": {
       "display_name": "微信小店保证金明细",
       "platform": "WXXD",
-      "data_type": "WXXD_FUNDS_FLOW_DETAIL",
-      "source_type": "WXXD_FUNDS_FLOW_DETAIL",
+      "data_type": "WXXD_DEPOSIT_BILL",
+      "source_type": "WXXD_DEPOSIT_BILL",
       "output": "inputs/微信小店/微信小店-保证金明细-WXXD_DEPOSIT_BILL.json"
     }
   }
