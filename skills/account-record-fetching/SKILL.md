@@ -32,6 +32,8 @@ python3 fetch_account_records.py dou_shop_account_item \
 
 示例：`inputs/淘宝（20260503至20260517）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json`
 
+长时间范围的切片原始数据保存在 `inputs/slices/<中文平台（YYYYMMDD至YYYYMMDD）>/`，合并结果仍保存在 `inputs/` 下的平台时间目录。
+
 平台目录里的时间范围来自 `start_time` / `end_time`。显式传 `--output` 时使用调用方给定路径。
 
 ## 分页行为

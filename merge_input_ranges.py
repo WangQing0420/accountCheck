@@ -11,7 +11,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 DATED_DIR_RE = re.compile(r"^(?P<platform>.+)（(?P<start>\d{8})至(?P<end>\d{8})）$")
@@ -86,25 +86,33 @@ def parse_dated_input_dir(path: Path) -> DatedInputDir | None:
 
 
 def merge_documents(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[str, Any], MergeStats]:
-    merged = copy.deepcopy(left)
-    left_data = left.get("data", {})
-    right_data = right.get("data", {})
+    return merge_documents_many([left, right])
+
+
+def merge_documents_many(documents: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], MergeStats]:
+    if not documents:
+        raise ValueError("Expected at least one document to merge")
+
+    merged = copy.deepcopy(documents[0])
     merged_data = merged.setdefault("data", {})
-    left_merchants = list_content(left_data)
-    right_merchants = list_content(right_data)
 
     merchant_order: list[tuple[Any, ...]] = []
     merchants_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
-    record_counts = [0, 0]
+    merchant_counts: list[int] = []
+    record_counts: list[int] = []
     duplicate_count = 0
     key_kinds: set[str] = set()
     conflicts: list[str] = []
 
-    for side_index, merchants in enumerate((left_merchants, right_merchants)):
+    for document in documents:
+        data = document.get("data", {})
+        merchants = list_content(data)
+        merchant_counts.append(len(merchants))
+        document_record_count = 0
         for merchant in merchants:
             key = merchant_key(merchant)
             rows = merchant_rows(merchant)
-            record_counts[side_index] += len(rows)
+            document_record_count += len(rows)
             if key not in merchants_by_key:
                 merchants_by_key[key] = copy.deepcopy(merchant)
                 set_merchant_rows(merchants_by_key[key], [])
@@ -123,6 +131,7 @@ def merge_documents(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[s
                 existing_rows.append(copy.deepcopy(row))
                 existing_keys[row_key] = existing_rows[-1]
             set_merchant_rows(target, existing_rows)
+        record_counts.append(document_record_count)
 
     merged_merchants = [merchants_by_key[key] for key in merchant_order]
     for merchant in merged_merchants:
@@ -134,11 +143,11 @@ def merge_documents(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[s
     rebuild_outer_data(merged_data)
     stats = MergeStats(
         left_records=record_counts[0],
-        right_records=record_counts[1],
+        right_records=sum(record_counts[1:]),
         merged_records=sum(len(merchant_rows(merchant)) for merchant in merged_merchants),
         duplicates=duplicate_count,
         dedupe_strategy=dedupe_strategy(key_kinds),
-        merchants_before=(len(left_merchants), len(right_merchants)),
+        merchants_before=(merchant_counts[0], sum(merchant_counts[1:])),
         merchants_after=len(merged_merchants),
         conflicts=conflicts,
     )
@@ -315,21 +324,28 @@ def merge_input_directories(input_root: Path) -> list[tuple[Path, Path, Path, Me
     merged_files: list[tuple[Path, Path, Path, MergeStats]] = []
     for platform, platform_dirs in sorted(by_platform.items()):
         source_dirs = select_source_dirs(platform_dirs)
-        if len(source_dirs) != 2:
-            print(f"SKIPPED {platform}: expected 2 source dated directories, found {len(source_dirs)}")
+        if len(source_dirs) < 2:
+            print(f"SKIPPED {platform}: expected at least 2 source dated directories, found {len(source_dirs)}")
             continue
-        left_dir, right_dir = sorted(source_dirs, key=lambda item: (item.start, item.end))
-        output_dir = input_root / f"{platform}（{left_dir.start}至{right_dir.end}）"
-        left_files = {path.name: path for path in left_dir.path.glob("*.json") if path.is_file()}
-        right_files = {path.name: path for path in right_dir.path.glob("*.json") if path.is_file()}
-        for filename in sorted(left_files.keys() & right_files.keys()):
+        ordered_dirs = sorted(source_dirs, key=lambda item: (item.start, item.end))
+        output_dir = input_root / f"{platform}（{ordered_dirs[0].start}至{ordered_dirs[-1].end}）"
+        files_by_dir = [
+            {path.name: path for path in dated_dir.path.glob("*.json") if path.is_file()}
+            for dated_dir in ordered_dirs
+        ]
+        common_filenames = set(files_by_dir[0])
+        for files in files_by_dir[1:]:
+            common_filenames &= set(files)
+        for filename in sorted(common_filenames):
+            source_paths = [files[filename] for files in files_by_dir]
             output_path = output_dir / filename
-            stats = merge_files(left_files[filename], right_files[filename], output_path)
-            merged_files.append((left_files[filename], right_files[filename], output_path, stats))
-            print_audit(left_files[filename], right_files[filename], output_path, stats)
-        for filename in sorted((left_files.keys() | right_files.keys()) - (left_files.keys() & right_files.keys())):
+            stats = merge_files(source_paths, output_path)
+            merged_files.append((source_paths[0], source_paths[-1], output_path, stats))
+            print_audit(source_paths, output_path, stats)
+        all_filenames = set().union(*(set(files) for files in files_by_dir))
+        for filename in sorted(all_filenames - common_filenames):
             print(f"SKIPPED {platform}/{filename}")
-            print("  reason: only one side exists")
+            print("  reason: file is not present in every source range")
     return merged_files
 
 
@@ -338,27 +354,26 @@ def select_source_dirs(platform_dirs: list[DatedInputDir]) -> list[DatedInputDir
         return platform_dirs
     min_start = min(item.start for item in platform_dirs)
     max_end = max(item.end for item in platform_dirs)
-    without_full_span = [item for item in platform_dirs if not (item.start == min_start and item.end == max_end)]
-    if len(without_full_span) == 2:
+    without_full_span = [item for item in platform_dirs if item.start != min_start or item.end != max_end]
+    if len(without_full_span) >= 2:
         return without_full_span
     return platform_dirs
 
 
-def merge_files(left_path: Path, right_path: Path, output_path: Path) -> MergeStats:
-    left = json.loads(left_path.read_text(encoding="utf-8"))
-    right = json.loads(right_path.read_text(encoding="utf-8"))
-    if not isinstance(left, dict) or not isinstance(right, dict):
-        raise ValueError(f"Expected JSON objects: {left_path}, {right_path}")
-    merged, stats = merge_documents(left, right)
+def merge_files(source_paths: list[Path], output_path: Path) -> MergeStats:
+    documents = [json.loads(path.read_text(encoding="utf-8")) for path in source_paths]
+    if not all(isinstance(document, dict) for document in documents):
+        raise ValueError(f"Expected JSON objects: {', '.join(str(path) for path in source_paths)}")
+    merged, stats = merge_documents_many(documents)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return stats
 
 
-def print_audit(left_path: Path, right_path: Path, output_path: Path, stats: MergeStats) -> None:
+def print_audit(source_paths: list[Path], output_path: Path, stats: MergeStats) -> None:
     print(f"MERGED {output_path}")
-    print(f"  left:  {left_path}")
-    print(f"  right: {right_path}")
+    for index, source_path in enumerate(source_paths, start=1):
+        print(f"  source{index}: {source_path}")
     print(f"  merchants: {stats.merchants_before[0]} + {stats.merchants_before[1]} -> {stats.merchants_after}")
     print(f"  records: {stats.left_records} + {stats.right_records} = {stats.left_records + stats.right_records} raw")
     print(f"  duplicates: {stats.duplicates}")
@@ -370,7 +385,7 @@ def print_audit(left_path: Path, right_path: Path, output_path: Path, stats: Mer
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Merge two dated account-check input ranges.")
+    parser = argparse.ArgumentParser(description="Merge dated account-check input ranges.")
     parser.add_argument("--input-root", type=Path, default=Path("inputs"), help="Input root directory. Default: inputs.")
     return parser.parse_args(argv)
 

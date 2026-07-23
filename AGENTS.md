@@ -4,7 +4,7 @@
 
 ## 目录
 
-- 输入：`inputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
+- 输入：合并结果 `inputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`；切片原始数据 `inputs/slices/<中文平台（YYYYMMDD至YYYYMMDD）>/<中文平台>-<账单类型>-<SOURCE_TYPE>.json`
 - 输出：`outputs/<中文平台（YYYYMMDD至YYYYMMDD）>/<bill_json_stem>.md`
 - 配置：`fetch_jobs.json`
 - token：`.env`，不要打印或提交

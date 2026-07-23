@@ -40,6 +40,24 @@ python3 fetch_account_records.py --all \
   --end-time "2026-05-13 23:59:59"
 ```
 
+命令行默认对不超过 31 天的范围按完整时间抓取；超过 31 天时先按最多 31 天切片。之后只有请求超时才会继续按日期二分，二分后的时段仍超时，会继续二分该时段。重复执行时会复用已完成的切片，只补抓缺失段。需要使用其他长度强制初始切片时，可用 `--split-days N`：
+
+```bash
+python3 fetch_account_records.py taobao \
+  --start-time "2026-06-01 00:00:00" \
+  --end-time "2026-07-01 23:59:59" \
+  --split-days 15
+```
+
+上述命令会生成：
+
+```text
+inputs/slices/淘宝（20260601至20260615）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json
+inputs/slices/淘宝（20260616至20260630）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json
+inputs/slices/淘宝（20260701至20260701）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json
+inputs/淘宝（20260601至20260701）/淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json
+```
+
 只抓某个库：
 
 ```bash
@@ -113,7 +131,7 @@ A6M1N_BASE_URL=https://a6m1n.topkjs.com
 
 ## 合并时间段
 
-当 `inputs/` 下同一平台有两段时间的数据时，可以用 `merge_input_ranges.py` 按平台和账单类型合并成一个完整时间段。
+当 `inputs/` 下同一平台已有多段时间的数据时，也可以用 `merge_input_ranges.py` 按平台和账单类型合并成一个完整时间段。
 
 例如：
 

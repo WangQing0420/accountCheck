@@ -9,7 +9,7 @@ import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, time as datetime_time, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,9 +20,11 @@ from account_record_fetcher import (
     load_settings,
     write_output,
 )
+from merge_input_ranges import merge_documents_many
 
 
 DEFAULT_CONFIG_PATH = Path("fetch_jobs.json")
+MAX_INITIAL_RANGE_DAYS = 31
 PLATFORM_ALIASES = {
     "taobao": "TAOBAO",
     "alibaba": "ALIBABA",
@@ -115,7 +117,7 @@ def normalize_jobs(raw_jobs: dict[str, Any], defaults: dict[str, Any]) -> dict[s
     return jobs
 
 
-def run_fetch_job(
+def _run_fetch_job_impl(
     job_name: str,
     *,
     config_path: Path = DEFAULT_CONFIG_PATH,
@@ -133,6 +135,7 @@ def run_fetch_job(
     node_workers: int = 1,
     record_workers: int = 1,
     resume_dir: Path | None = None,
+    split_days: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     jobs = load_fetch_jobs(config_path)
     if job_name not in jobs:
@@ -161,6 +164,29 @@ def run_fetch_job(
 
     output_path = Path(str(job["output"])) if explicit_output else build_default_output_path(job)
     active_fetcher = fetcher or AccountRecordFetcher(load_settings(env_path), progress=progress)
+
+    if split_days is not None:
+        if single_page:
+            raise FetchJobError("--split-days cannot be used with --single-page")
+        return run_fetch_job_in_slices(
+            job_name,
+            job,
+            output_path=output_path,
+            explicit_output=explicit_output,
+            config_path=config_path,
+            env_path=env_path,
+            fetcher=active_fetcher,
+            progress=progress,
+            page_size=page_size,
+            page_number=page_number,
+            user_id_or_nick=user_id_or_nick,
+            node_id=node_id,
+            node_workers=node_workers,
+            record_workers=record_workers,
+            resume_dir=resume_dir,
+            split_days=split_days,
+        )
+
     node_ids = node_ids_for_job(job)
     log_progress(
         progress,
@@ -245,6 +271,298 @@ def run_fetch_job(
     return output_path, response
 
 
+def run_fetch_job(
+    job_name: str,
+    *,
+    config_path: Path = DEFAULT_CONFIG_PATH,
+    env_path: Path = DEFAULT_ENV_PATH,
+    fetcher: AccountRecordFetcher | Any | None = None,
+    progress: Callable[[str], None] | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    output: Path | None = None,
+    page_size: int | None = None,
+    page_number: int | None = None,
+    user_id_or_nick: str | None = None,
+    node_id: int | None = None,
+    single_page: bool = False,
+    node_workers: int = 1,
+    record_workers: int = 1,
+    resume_dir: Path | None = None,
+    split_days: int | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    effective_split_days = split_days
+    if split_days is None and not single_page:
+        jobs = load_fetch_jobs(config_path)
+        if job_name in jobs:
+            job = dict(jobs[job_name])
+            if start_time is not None:
+                job["start_time"] = start_time
+            if end_time is not None:
+                job["end_time"] = end_time
+            if job.get("start_time") not in {None, ""} and job.get("end_time") not in {None, ""}:
+                if calendar_days_between(str(job["start_time"]), str(job["end_time"])) > MAX_INITIAL_RANGE_DAYS:
+                    effective_split_days = MAX_INITIAL_RANGE_DAYS
+                    log_progress(
+                        progress,
+                        f"range exceeds maximum initial span job={job_name} "
+                        f"split_days={MAX_INITIAL_RANGE_DAYS}",
+                    )
+
+    try:
+        return _run_fetch_job_impl(
+            job_name,
+            config_path=config_path,
+            env_path=env_path,
+            fetcher=fetcher,
+            progress=progress,
+            start_time=start_time,
+            end_time=end_time,
+            output=output,
+            page_size=page_size,
+            page_number=page_number,
+            user_id_or_nick=user_id_or_nick,
+            node_id=node_id,
+            single_page=single_page,
+            node_workers=node_workers,
+            record_workers=record_workers,
+            resume_dir=resume_dir,
+            split_days=effective_split_days,
+        )
+    except Exception as error:
+        if split_days is not None or single_page or not is_timeout_error(error):
+            raise
+
+        jobs = load_fetch_jobs(config_path)
+        if job_name not in jobs:
+            raise
+        job = dict(jobs[job_name])
+        if start_time is not None:
+            job["start_time"] = start_time
+        if end_time is not None:
+            job["end_time"] = end_time
+        require_job_fields(job_name, job, ["platform", "data_type", "start_time", "end_time"])
+        range_days = calendar_days_between(str(job["start_time"]), str(job["end_time"]))
+        if range_days <= 1:
+            raise
+        fallback_days = max(1, (range_days + 1) // 2)
+        log_progress(
+            progress,
+            f"range timeout job={job_name} fallback_days={fallback_days} "
+            f"time_range={str(job['start_time'])!r}..{str(job['end_time'])!r} error={error}",
+        )
+        return _run_fetch_job_impl(
+            job_name,
+            config_path=config_path,
+            env_path=env_path,
+            fetcher=fetcher,
+            progress=progress,
+            start_time=start_time,
+            end_time=end_time,
+            output=output,
+            page_size=page_size,
+            page_number=page_number,
+            user_id_or_nick=user_id_or_nick,
+            node_id=node_id,
+            single_page=single_page,
+            node_workers=node_workers,
+            record_workers=record_workers,
+            resume_dir=resume_dir,
+            split_days=fallback_days,
+        )
+
+
+def run_fetch_job_in_slices(
+    job_name: str,
+    job: dict[str, Any],
+    *,
+    output_path: Path,
+    explicit_output: bool,
+    config_path: Path,
+    env_path: Path,
+    fetcher: Any,
+    progress: Callable[[str], None] | None,
+    page_size: int | None,
+    page_number: int | None,
+    user_id_or_nick: str | None,
+    node_id: int | None,
+    node_workers: int,
+    record_workers: int,
+    resume_dir: Path | None,
+    split_days: int,
+) -> tuple[Path, dict[str, Any]]:
+    ranges = split_time_range(str(job["start_time"]), str(job["end_time"]), split_days)
+    if len(ranges) == 1 and explicit_output:
+        return run_fetch_job(
+            job_name,
+            config_path=config_path,
+            env_path=env_path,
+            fetcher=fetcher,
+            progress=progress,
+            start_time=ranges[0][0],
+            end_time=ranges[0][1],
+            output=output_path if explicit_output else None,
+            page_size=page_size,
+            page_number=page_number,
+            user_id_or_nick=user_id_or_nick,
+            node_id=node_id,
+            single_page=False,
+            node_workers=node_workers,
+            record_workers=record_workers,
+            resume_dir=resume_dir,
+            split_days=None,
+        )
+
+    def fetch_slice_with_fallback(
+        slice_start: str,
+        slice_end: str,
+        slice_label: str,
+    ) -> list[dict[str, Any]]:
+        slice_job = {**job, "start_time": slice_start, "end_time": slice_end}
+        slice_path = build_slice_output_path(slice_job, output_path, explicit_output)
+        log_progress(
+            progress,
+            f"slice start job={job_name} slice={slice_label} "
+            f"time_range={slice_start!r}..{slice_end!r} path={slice_path}",
+        )
+        response = load_complete_response(slice_path)
+        if response is not None:
+            log_progress(progress, f"slice reuse job={job_name} slice={slice_label} path={slice_path}")
+            return [response]
+
+        try:
+            _, response = run_fetch_job(
+                job_name,
+                config_path=config_path,
+                env_path=env_path,
+                fetcher=fetcher,
+                progress=progress,
+                start_time=slice_start,
+                end_time=slice_end,
+                output=slice_path,
+                page_size=page_size,
+                page_number=page_number,
+                user_id_or_nick=user_id_or_nick,
+                node_id=node_id,
+                single_page=False,
+                node_workers=node_workers,
+                record_workers=record_workers,
+                resume_dir=resume_dir,
+                split_days=None,
+            )
+        except Exception as error:
+            range_days = calendar_days_between(slice_start, slice_end)
+            if not is_timeout_error(error) or range_days <= 1:
+                raise
+            fallback_days = max(1, (range_days + 1) // 2)
+            fallback_ranges = split_time_range(slice_start, slice_end, fallback_days)
+            log_progress(
+                progress,
+                f"slice timeout job={job_name} slice={slice_label} "
+                f"fallback_days={fallback_days} parts={len(fallback_ranges)} error={error}",
+            )
+            fallback_documents: list[dict[str, Any]] = []
+            for fallback_index, (fallback_start, fallback_end) in enumerate(fallback_ranges, start=1):
+                fallback_documents.extend(
+                    fetch_slice_with_fallback(
+                        fallback_start,
+                        fallback_end,
+                        f"{slice_label}.{fallback_index}",
+                    )
+                )
+            return fallback_documents
+
+        log_progress(progress, f"slice done job={job_name} slice={slice_label} path={slice_path}")
+        return [response]
+
+    slice_documents: list[dict[str, Any]] = []
+    for index, (slice_start, slice_end) in enumerate(ranges, start=1):
+        slice_documents.extend(fetch_slice_with_fallback(slice_start, slice_end, f"{index}/{len(ranges)}"))
+
+    merged, stats = merge_documents_many(slice_documents)
+    write_json_atomically(output_path, merged)
+    log_progress(
+        progress,
+        f"slices merged job={job_name} slices={len(ranges)} records={stats.merged_records} path={output_path}",
+    )
+    return output_path, merged
+
+
+def build_slice_output_path(job: dict[str, Any], final_output: Path, explicit_output: bool) -> Path:
+    slice_root = output_root_for_job(job) / "slices"
+    if not explicit_output:
+        default_path = build_default_output_path(job)
+        return slice_root / default_path.parent.name / default_path.name
+    platform_label = output_platform_label(job)
+    return slice_root / output_platform_directory(job, platform_label) / final_output.name
+
+
+def load_complete_response(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        response = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(response, dict) or response.get("success") is False:
+        return None
+    partial = response.get("_partialFetch")
+    if isinstance(partial, dict) and partial.get("partial"):
+        return None
+    if not isinstance(response.get("data"), dict):
+        return None
+    return response
+
+
+def write_json_atomically(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.tmp")
+    try:
+        write_output(temporary_path, data)
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def split_time_range(start_time: str, end_time: str, split_days: int) -> list[tuple[str, str]]:
+    if split_days <= 0:
+        raise ValueError("split_days must be a positive integer")
+    start = parse_fetch_datetime(start_time)
+    end = parse_fetch_datetime(end_time)
+    if end < start:
+        raise ValueError("end_time must not be earlier than start_time")
+
+    ranges: list[tuple[str, str]] = []
+    cursor = start
+    while cursor.date() <= end.date():
+        segment_end_date = min(cursor.date() + timedelta(days=split_days - 1), end.date())
+        segment_end = datetime.combine(segment_end_date, datetime_time(23, 59, 59))
+        if segment_end > end:
+            segment_end = end
+        ranges.append((format_fetch_datetime(cursor), format_fetch_datetime(segment_end)))
+        cursor = datetime.combine(segment_end_date + timedelta(days=1), datetime_time.min)
+    return ranges
+
+
+def calendar_days_between(start_time: str, end_time: str) -> int:
+    start = parse_fetch_datetime(start_time)
+    end = parse_fetch_datetime(end_time)
+    return (end.date() - start.date()).days + 1
+
+
+def is_timeout_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    return isinstance(error, TimeoutError) or "timed out" in message or "timeout" in message
+
+
+def parse_fetch_datetime(value: str) -> datetime:
+    return datetime.strptime(str(value).strip(), "%Y-%m-%d %H:%M:%S")
+
+
+def format_fetch_datetime(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def run_fetch_jobs(
     *,
     config_path: Path = DEFAULT_CONFIG_PATH,
@@ -261,6 +579,7 @@ def run_fetch_jobs(
     node_workers: int = 1,
     record_workers: int = 1,
     resume_dir: Path | None = None,
+    split_days: int | None = None,
 ) -> list[tuple[str, Path, dict[str, Any]]]:
     jobs = load_fetch_jobs(config_path)
     active_fetcher = fetcher or AccountRecordFetcher(load_settings(env_path), progress=progress)
@@ -282,6 +601,7 @@ def run_fetch_jobs(
             node_workers=node_workers,
             record_workers=record_workers,
             resume_dir=resume_dir,
+            split_days=split_days,
         )
         results.append((job_name, output_path, response))
     return results
@@ -304,6 +624,7 @@ def run_fetch_platform(
     node_workers: int = 1,
     record_workers: int = 1,
     resume_dir: Path | None = None,
+    split_days: int | None = None,
 ) -> list[tuple[str, Path, dict[str, Any]]]:
     platform = platform_for_alias(platform_alias)
     if platform is None:
@@ -332,6 +653,7 @@ def run_fetch_platform(
             node_workers=node_workers,
             record_workers=record_workers,
             resume_dir=resume_dir,
+            split_days=split_days,
         )
         results.append((job_name, output_path, response))
 
@@ -584,6 +906,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--node-workers", type=int, default=1, help="Concurrent node fetch workers. Default: 1.")
     parser.add_argument("--record-workers", type=int, default=1, help="Concurrent per-merchant record page workers. Default: 1.")
     parser.add_argument("--resume-dir", type=Path, help="Cache fetched merchant record pages for resumable runs.")
+    parser.add_argument("--split-days", type=int, help="Force initial natural-day chunks; without it, split only after a timeout.")
     return parser.parse_args(argv)
 
 
@@ -611,6 +934,7 @@ def main(argv: list[str] | None = None) -> int:
         print("error: provide a job name or --all", file=sys.stderr)
         return 1
 
+    split_days = None if args.single_page else args.split_days
     started_at = time.monotonic()
     try:
         if args.all:
@@ -628,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
                 node_workers=args.node_workers,
                 record_workers=args.record_workers,
                 resume_dir=args.resume_dir,
+                split_days=split_days,
             )
             elapsed = format_elapsed_seconds(started_at)
             for job_name, output_path, _ in results:
@@ -648,6 +973,7 @@ def main(argv: list[str] | None = None) -> int:
                 node_workers=args.node_workers,
                 record_workers=args.record_workers,
                 resume_dir=args.resume_dir,
+                split_days=split_days,
             )
             elapsed = format_elapsed_seconds(started_at)
             for job_name, output_path, _ in results:
@@ -669,6 +995,7 @@ def main(argv: list[str] | None = None) -> int:
                 node_workers=args.node_workers,
                 record_workers=args.record_workers,
                 resume_dir=args.resume_dir,
+                split_days=split_days,
             )
             print(f"Wrote {output_path} 耗时{format_elapsed_seconds(started_at)}")
     except (FetchJobError, JsonApiError, OSError, ValueError, json.JSONDecodeError) as error:

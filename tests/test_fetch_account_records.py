@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,8 @@ platform_for_alias = fetch_account_records.platform_for_alias
 run_fetch_job = fetch_account_records.run_fetch_job
 run_fetch_jobs = fetch_account_records.run_fetch_jobs
 run_fetch_platform = fetch_account_records.run_fetch_platform
+parse_args = fetch_account_records.parse_args
+split_time_range = fetch_account_records.split_time_range
 stderr_progress = fetch_account_records.stderr_progress
 
 
@@ -42,6 +45,40 @@ class FakeFetcher:
     def fetch_check_all_user(self, **kwargs):
         self.calls.append({"all_pages": False, **kwargs})
         return self.response
+
+
+class DateAwareFetcher:
+    def __init__(self, failing_start: str | None = None):
+        self.failing_start = failing_start
+        self.calls = []
+
+    def fetch_check_all_users(self, **kwargs):
+        self.calls.append({"all_pages": True, **kwargs})
+        if kwargs["start_time"] == self.failing_start:
+            raise OSError("slice network dropped")
+        record_id = kwargs["start_time"][:10]
+        merchant = {
+            "userId": 1,
+            "nick": "店铺A",
+            "pagedRecords": {
+                "content": [{"id": record_id, "createTime": f"{record_id} 12:00:00"}],
+                "pageNumber": 1,
+                "pageSize": 20,
+                "total": 1,
+                "totalPage": 1,
+            },
+        }
+        return {"success": True, "data": {"content": [merchant], "total": 1}}
+
+
+class RangeLimitedFetcher(DateAwareFetcher):
+    def fetch_check_all_users(self, **kwargs):
+        start = datetime.strptime(kwargs["start_time"], "%Y-%m-%d %H:%M:%S")
+        end = datetime.strptime(kwargs["end_time"], "%Y-%m-%d %H:%M:%S")
+        if (end.date() - start.date()).days + 1 > 8:
+            self.calls.append({"all_pages": True, **kwargs})
+            raise TimeoutError("The read operation timed out")
+        return super().fetch_check_all_users(**kwargs)
 
 
 class FakeMultiNodeFetcher:
@@ -176,6 +213,222 @@ class ConcurrentFailingSecondNodeFetcher:
 
 
 class FetchAccountRecordsTests(unittest.TestCase):
+    def test_long_range_is_initially_split_into_ranges_no_longer_than_31_days(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-05-01 00:00:00",
+                    "end_time": "2026-07-01 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            fetcher = DateAwareFetcher()
+
+            output_path, _ = run_fetch_job("taobao", config_path=config_path, fetcher=fetcher)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(
+                [(call["start_time"], call["end_time"]) for call in fetcher.calls],
+                [
+                    ("2026-05-01 00:00:00", "2026-05-31 23:59:59"),
+                    ("2026-06-01 00:00:00", "2026-07-01 23:59:59"),
+                ],
+            )
+
+    def test_unsplit_fetch_reduces_range_only_after_timeout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-06-01 00:00:00",
+                    "end_time": "2026-06-15 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            fetcher = RangeLimitedFetcher()
+
+            output_path, _ = run_fetch_job("taobao", config_path=config_path, fetcher=fetcher)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(
+                [(call["start_time"], call["end_time"]) for call in fetcher.calls],
+                [
+                    ("2026-06-01 00:00:00", "2026-06-15 23:59:59"),
+                    ("2026-06-01 00:00:00", "2026-06-08 23:59:59"),
+                    ("2026-06-09 00:00:00", "2026-06-15 23:59:59"),
+                ],
+            )
+
+    def test_split_fetch_reduces_only_a_timed_out_slice_until_it_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-06-01 00:00:00",
+                    "end_time": "2026-06-15 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            fetcher = RangeLimitedFetcher()
+
+            output_path, _ = run_fetch_job("taobao", config_path=config_path, fetcher=fetcher, split_days=15)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(
+                [(call["start_time"], call["end_time"]) for call in fetcher.calls],
+                [
+                    ("2026-06-01 00:00:00", "2026-06-15 23:59:59"),
+                    ("2026-06-01 00:00:00", "2026-06-08 23:59:59"),
+                    ("2026-06-09 00:00:00", "2026-06-15 23:59:59"),
+                ],
+            )
+
+    def test_split_fetch_preserves_slice_files_and_writes_merged_full_range(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-06-01 00:00:00",
+                    "end_time": "2026-07-01 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            fetcher = DateAwareFetcher()
+
+            output_path, merged = run_fetch_job(
+                "taobao",
+                config_path=config_path,
+                fetcher=fetcher,
+                split_days=15,
+            )
+
+            expected_ranges = [
+                ("20260601", "20260615"),
+                ("20260616", "20260630"),
+                ("20260701", "20260701"),
+            ]
+            for start, end in expected_ranges:
+                slice_path = (
+                    Path(tmpdir)
+                    / "inputs"
+                    / "slices"
+                    / f"淘宝（{start}至{end}）"
+                    / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+                )
+                self.assertTrue(slice_path.exists(), slice_path)
+            self.assertEqual(
+                output_path,
+                Path(tmpdir)
+                / "inputs"
+                / "淘宝（20260601至20260701）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json",
+            )
+            self.assertEqual(
+                [row["id"] for row in merged["data"]["content"][0]["pagedRecords"]["content"]],
+                ["2026-06-01", "2026-06-16", "2026-07-01"],
+            )
+            self.assertEqual(
+                [call["start_time"] for call in fetcher.calls],
+                ["2026-06-01 00:00:00", "2026-06-16 00:00:00", "2026-07-01 00:00:00"],
+            )
+
+    def test_split_fetch_reuses_completed_slices_and_fetches_only_missing_slice(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-06-01 00:00:00",
+                    "end_time": "2026-07-01 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            first_fetcher = DateAwareFetcher()
+            run_fetch_job("taobao", config_path=config_path, fetcher=first_fetcher, split_days=15)
+            third_slice = (
+                Path(tmpdir)
+                / "inputs"
+                / "slices"
+                / "淘宝（20260701至20260701）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
+            third_slice.unlink()
+
+            second_fetcher = DateAwareFetcher()
+            run_fetch_job("taobao", config_path=config_path, fetcher=second_fetcher, split_days=15)
+
+            self.assertEqual([call["start_time"] for call in second_fetcher.calls], ["2026-07-01 00:00:00"])
+
+    def test_split_fetch_does_not_replace_final_output_when_a_slice_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self.write_config(tmpdir)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["defaults"].update(
+                {
+                    "start_time": "2026-06-01 00:00:00",
+                    "end_time": "2026-07-01 23:59:59",
+                }
+            )
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            output_path = (
+                Path(tmpdir)
+                / "inputs"
+                / "淘宝（20260601至20260701）"
+                / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+            )
+            output_path.parent.mkdir(parents=True)
+            output_path.write_text('{"sentinel": true}\n', encoding="utf-8")
+            original_output = output_path.read_text(encoding="utf-8")
+
+            with self.assertRaises(OSError):
+                run_fetch_job(
+                    "taobao",
+                    config_path=config_path,
+                    fetcher=DateAwareFetcher("2026-07-01 00:00:00"),
+                    split_days=15,
+                )
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), original_output)
+            self.assertTrue(
+                (
+                    Path(tmpdir)
+                    / "inputs"
+                    / "slices"
+                    / "淘宝（20260616至20260630）"
+                    / "淘宝-通用账单-TAOBAO_ACCOUNT_RECORD.json"
+                ).exists()
+            )
+
+    def test_cli_does_not_split_until_a_timeout_by_default(self):
+        self.assertIsNone(parse_args(["taobao"]).split_days)
+
+    def test_main_single_page_disables_automatic_splitting(self):
+        with patch("fetch_account_records.run_fetch_job", return_value=(Path("result.json"), {})) as runner:
+            self.assertEqual(main(["taobao", "--single-page"]), 0)
+
+        self.assertIsNone(runner.call_args.kwargs["split_days"])
+
+    def test_split_time_range_splits_31_days_into_three_15_day_chunks(self):
+        self.assertEqual(
+            split_time_range("2026-06-01 00:00:00", "2026-07-01 23:59:59", 15),
+            [
+                ("2026-06-01 00:00:00", "2026-06-15 23:59:59"),
+                ("2026-06-16 00:00:00", "2026-06-30 23:59:59"),
+                ("2026-07-01 00:00:00", "2026-07-01 23:59:59"),
+            ],
+        )
+
+    def test_split_time_range_rejects_invalid_ranges(self):
+        with self.assertRaises(ValueError):
+            split_time_range("2026-06-02 00:00:00", "2026-06-01 23:59:59", 15)
+        with self.assertRaises(ValueError):
+            split_time_range("2026-06-01 00:00:00", "2026-06-01 23:59:59", 0)
+
     def write_config(self, tmpdir: str, *, node_ids: list[int] | None = None) -> Path:
         path = Path(tmpdir) / "fetch_jobs.json"
         taobao_job = {
